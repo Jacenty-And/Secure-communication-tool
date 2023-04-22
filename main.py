@@ -1,13 +1,23 @@
-from server import Listener
+from encryption import load_keys
+from server import Server
 from client import Client
-from encryption import *
+
+HOST = "127.0.0.1"
+PORT = 65432
 
 if __name__ == '__main__':
-    if input("Do you want to generate new keys? Y/N ").capitalize() == 'Y':
-        generate_keys()
-        print("New keys generated")
     private_key, public_key = load_keys()
-    listener = Listener(private_key)
-    client = Client(public_key)
-    listener.start()
-    client.start()
+    client = Client(HOST, PORT, public_key)
+    server = Server(HOST, PORT, private_key)
+    while True:
+        print("1. Send")
+        print("2. Receive")
+        print("3. Quit")
+        menu = input(": ")
+        if menu == "1":
+            client.send()
+        elif menu == "2":
+            server.receive()
+        elif menu == "3":
+            break
+

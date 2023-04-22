@@ -1,28 +1,25 @@
 import socket
-from threading import Thread
-from encryption import *
-
-HOST = "127.0.0.1"
-PORT = 65432
+from encryption import decrypt
 
 
-class Listener(Thread):
-    def __init__(self, private_key):
-        super().__init__()
+class Server:
+    def __init__(self, host, port, private_key):
+        self.host = host
+        self.port = port
         self.private_key = private_key
 
-    def run(self) -> None:
-        while True:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind((HOST, PORT))
-                s.listen()
-                conn, addr = s.accept()
-                with conn:
-                    print(f"Connected by {addr}")
-                    while True:
-                        data = conn.recv(1024)
-                        if not data:
-                            break
-                        print(f"Raw data: {data}")
-                        decrypted = decrypt(data, self.private_key)
-                        print(f"Decrypted: {decrypted}")
+    def receive(self) -> None:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+            server_socket.bind((self.host, self.port))
+            server_socket.listen()
+            print("Waiting for connection...")
+            client_socket, address = server_socket.accept()
+            with client_socket:
+                print(f"Connected by {address}")
+                while True:
+                    data = client_socket.recv(1024)
+                    if not data:
+                        break
+                    print(f"Raw data: {data}")
+                    decrypted = decrypt(data, self.private_key)
+                    print(f"Decrypted: {decrypted}")
