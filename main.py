@@ -1,12 +1,10 @@
-from encryption import load_keys
 from client import Client
 
 HOST = "127.0.0.1"
 PORT = 65432
 
 if __name__ == '__main__':
-    private_key, public_key = load_keys()
-    client = Client(HOST, PORT, private_key, public_key)
+    client = Client(HOST, PORT)
     client.run()
     while True:
         print("1. Send")

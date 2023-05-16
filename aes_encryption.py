@@ -3,7 +3,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 
 
-def generate_random_key(size=32):
+def generate_random_key(size: int) -> bytes:
     return get_random_bytes(size)
 
 

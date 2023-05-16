@@ -1,28 +1,34 @@
 import socket
-from encryption import encrypt, decrypt
-from threading import Thread, Event
+from typing import Tuple
+
+from rsa_encryption import encrypt, decrypt, generate_keys, load_public_key, load_private_key, PublicKey, PrivateKey
+from aes_encryption import generate_random_key
+from threading import Thread
 from queue import Queue
 
 
 class Client:
-    def __init__(self, host, port, private_key, public_key):
+    def __init__(self, host, port):
         self.host_num = host
         self.port_num = port
-        self.private_key = private_key
-        self.public_key = public_key
+
         self.messages_to_send = Queue()
         self.messages_received = Queue()
-        self.client_socket = self.try_host_else_connect()
+
+        self.client_socket, self.is_hosting = self.try_host_else_connect()
+        self.session_key = self.generate_or_receive_session_key()
         self.running = False
 
-    def try_host_else_connect(self) -> socket.socket:
+    def try_host_else_connect(self) -> Tuple[socket.socket, bool]:
         try:
             # Client is hosting the connection if possible
             client_socket = self.host()
+            is_hosting = True
         except WindowsError:
             # If there is already a host, client is connecting to it
             client_socket = self.connect()
-        return client_socket
+            is_hosting = False
+        return client_socket, is_hosting
 
     def host(self) -> socket.socket:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
@@ -40,6 +46,59 @@ class Client:
         print("I connected to the host!")
         return client_socket
 
+    def generate_or_receive_session_key(self) -> bytes:
+        if self.is_hosting:
+            # If the client is hosting the connection
+            # public and private keys are generated
+            # session key is received from another client
+            public_key, private_key = self.generate_and_load_keys("./keys")
+            self.send_public_key("./keys/public_key.pem")
+            encrypted_key = self.client_socket.recv(1024)
+            session_key = decrypt(encrypted_key, private_key)
+            print("Session key received!")
+        else:
+            # If the client is connected to the host
+            # public key is received from another client
+            # session key is generated
+            public_key = self.receive_public_key("./received_keys/public_key.pem")
+            print("Generating session key")
+            session_key = generate_random_key(32)
+            encrypted_key = encrypt(session_key, public_key)
+            self.client_socket.send(encrypted_key)
+            print("Session key sent!")
+        return session_key
+
+    @staticmethod
+    def generate_and_load_keys(path) -> Tuple[PublicKey, PrivateKey]:
+        print("Generating public and private keys")
+        generate_keys(path)
+        public_key = load_public_key(f"{path}/public_key.pem")
+        private_key = load_private_key(f"{path}/private_key.pem")
+        return public_key, private_key
+
+    def send_public_key(self, file_path) -> None:
+        self.client_socket.send("PUBLIC_KEY".encode())
+        with open(file_path, "rb") as file:
+            data = file.read()
+        self.client_socket.sendall(data)
+        self.client_socket.send("<END>".encode())
+        print("Public key sent!")
+
+    def receive_public_key(self, file_path) -> PublicKey:
+        if not self.client_socket.recv(1024).decode().startswith("PUBLIC_KEY"):
+            print("Public key not received. Exiting the program")
+            exit()
+        file_bytes = b""
+        while not file_bytes.decode().endswith("<END>"):
+            data = self.client_socket.recv(1024)
+            file_bytes += data
+        file_bytes = file_bytes.replace(b"<END>", b"")
+        with open(file_path, "wb") as file:
+            file.write(file_bytes)
+        print("Public key received!")
+        public_key = load_public_key(file_path)
+        return public_key
+
     def add_message(self, message) -> None:
         self.messages_to_send.put(message)
 
@@ -52,6 +111,7 @@ class Client:
     def send_threading(self) -> None:
         while True:
             message = self.messages_to_send.get()
+            # TODO encrypt using AES encryption
             ciphertext = encrypt(message, self.public_key)
             self.client_socket.send(ciphertext)
 
@@ -60,11 +120,13 @@ class Client:
             try:
                 # Client is trying to receive a message
                 message = self.client_socket.recv(1024)
+                # TODO decrypt using AES decryption
                 decrypted = decrypt(message, self.private_key)
                 self.messages_received.put(decrypted)
             except WindowsError:
                 # If the existing connection is closed, client become a host
                 print("Connection lost!")
+                # TODO fix reconnecting
                 self.client_socket = self.try_host_else_connect()
 
     def run(self) -> None:
