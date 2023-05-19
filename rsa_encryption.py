@@ -1,10 +1,16 @@
+from typing import Tuple
+
 from rsa import newkeys, PublicKey, PrivateKey
 from rsa import encrypt as rsa_encrypt
 from rsa import decrypt as rsa_decrypt
 
 
-def generate_keys(path: str):
+def generate_keys() -> Tuple[PublicKey, PrivateKey]:
     public_key, private_key = newkeys(1024)
+    return public_key, private_key
+
+
+def save_keys(public_key: PublicKey, private_key: PrivateKey, path: str) -> None:
     with open(f'{path}/public_key.pem', 'wb') as file:
         file.write(public_key.save_pkcs1('PEM'))
     with open(f'{path}/private_key.pem', 'wb') as file:

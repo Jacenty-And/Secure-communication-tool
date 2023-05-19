@@ -1,7 +1,6 @@
 import socket
-from typing import Tuple
 
-from rsa_encryption import generate_keys, load_public_key, load_private_key, PublicKey, PrivateKey
+from rsa_encryption import generate_keys, PublicKey
 from rsa_encryption import encrypt as asym_encrypt
 from rsa_encryption import decrypt as asym_decrypt
 
@@ -58,8 +57,8 @@ class Client:
             # If the client is hosting the connection
             # public and private keys are generated
             # session key is received from another client
-            public_key, private_key = self.generate_and_load_keys("./keys")
-            self.send_public_key("./keys/public_key.pem")
+            public_key, private_key = generate_keys()
+            self.send_public_key(public_key)
             encrypted_key = self.client_socket.recv(1024)
             session_key = asym_decrypt(encrypted_key, private_key)
             print("Session key received!")
@@ -67,7 +66,7 @@ class Client:
             # If the client is connected to the host
             # public key is received from another client
             # session key is generated
-            public_key = self.receive_public_key("./received_keys/public_key.pem")
+            public_key = self.receive_public_key()
             print("Generating session key")
             session_key = generate_random_key(32)
             encrypted_key = asym_encrypt(session_key, public_key)
@@ -75,35 +74,24 @@ class Client:
             print("Session key sent!")
         return session_key
 
-    @staticmethod
-    def generate_and_load_keys(path) -> Tuple[PublicKey, PrivateKey]:
-        print("Generating public and private keys")
-        generate_keys(path)
-        public_key = load_public_key(f"{path}/public_key.pem")
-        private_key = load_private_key(f"{path}/private_key.pem")
-        return public_key, private_key
-
-    def send_public_key(self, file_path) -> None:
-        self.client_socket.send("PUBLIC_KEY".encode())
-        with open(file_path, "rb") as file:
-            data = file.read()
-        self.client_socket.sendall(data)
+    def send_public_key(self, public_key: PublicKey) -> None:
+        self.client_socket.send("<PUBLIC_KEY>".encode())
+        key_bytes = public_key.save_pkcs1('PEM')
+        self.client_socket.sendall(key_bytes)
         self.client_socket.send("<END>".encode())
         print("Public key sent!")
 
-    def receive_public_key(self, file_path) -> PublicKey:
-        if not self.client_socket.recv(1024).decode().startswith("PUBLIC_KEY"):
+    def receive_public_key(self) -> PublicKey:
+        if not self.client_socket.recv(1024).decode().startswith("<PUBLIC_KEY>"):
             print("Public key not received. Exiting the program")
             exit()
-        file_bytes = b""
-        while not file_bytes.decode().endswith("<END>"):
+        key_bytes = b""
+        while not key_bytes.decode().endswith("<END>"):
             data = self.client_socket.recv(1024)
-            file_bytes += data
-        file_bytes = file_bytes.replace(b"<END>", b"")
-        with open(file_path, "wb") as file:
-            file.write(file_bytes)
+            key_bytes += data
+        key_bytes = key_bytes.replace(b"<END>", b"")
         print("Public key received!")
-        public_key = load_public_key(file_path)
+        public_key = PublicKey.load_pkcs1(key_bytes)
         return public_key
 
     def add_message(self, message) -> None:

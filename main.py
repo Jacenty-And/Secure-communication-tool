@@ -3,6 +3,10 @@ from client import Client
 HOST = "127.0.0.1"
 PORT = 65432
 
+
+# TODO encrypting symmetrically, using hash as a key,
+#  public and private keys before saving them to a file
+
 if __name__ == '__main__':
     client = Client(HOST, PORT)
     client.run()
