@@ -4,9 +4,7 @@ from rsa_encryption import generate_keys, PublicKey
 from rsa_encryption import encrypt as asym_encrypt
 from rsa_encryption import decrypt as asym_decrypt
 
-from aes_encryption import generate_random_key
-from aes_encryption import encrypt as sym_encrypt
-from aes_encryption import decrypt as sym_decrypt
+from aes_encryption import generate_random_key, encrypt_ECB, decrypt_ECB, encrypt_CBC, decrypt_CBC
 
 from threading import Thread
 from queue import Queue
@@ -106,7 +104,7 @@ class Client:
     def send_threading(self) -> None:
         while True:
             message = self.messages_to_send.get()
-            ciphertext = sym_encrypt(message, self.session_key)
+            ciphertext = encrypt_ECB(message, self.session_key)
             self.client_socket.send(ciphertext)
 
     def receive_threading(self) -> None:
@@ -114,7 +112,7 @@ class Client:
             try:
                 # Client is trying to receive a message
                 message = self.client_socket.recv(1024)
-                decrypted = sym_decrypt(message, self.session_key)
+                decrypted = decrypt_ECB(message, self.session_key)
                 self.messages_received.put(decrypted)
             except WindowsError:
                 # If the existing connection is closed, client become a host
