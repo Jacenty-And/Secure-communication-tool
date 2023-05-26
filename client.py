@@ -1,10 +1,12 @@
 import socket
 
-from rsa_encryption import generate_keys, PublicKey
+from rsa_encryption import generate_keys, save_keys, encrypt_private_key, PublicKey
 from rsa_encryption import encrypt as asym_encrypt
 from rsa_encryption import decrypt as asym_decrypt
 
 from aes_encryption import generate_random_key, encrypt_ECB, decrypt_ECB, encrypt_CBC, decrypt_CBC
+
+from sha_hashing import get_local_key
 
 from threading import Thread
 from queue import Queue
@@ -56,6 +58,16 @@ class Client:
             # public and private keys are generated
             # session key is received from another client
             public_key, private_key = generate_keys()
+            if input("Do you want to save your public and private keys? Y/N ").capitalize() == "Y":
+                path = input("Where do you want to save your keys? ")
+                password = input("Enter the password: ")
+                save_keys(public_key, private_key, path)
+                local_key = get_local_key(password)
+                encrypted_private_key = encrypt_private_key(private_key, local_key)
+                with open(f'{path}2/public_key.pem', 'wb') as file:
+                    file.write(public_key.save_pkcs1('PEM'))
+                with open(f"{path}2/private_key.pem", "wb") as file:
+                    file.write(encrypted_private_key)
             self.send_public_key(public_key)
             encrypted_key = self.client_socket.recv(1024)
             session_key = asym_decrypt(encrypted_key, private_key)
@@ -68,6 +80,9 @@ class Client:
             print("Generating session key")
             session_key = generate_random_key(32)
             encrypted_key = asym_encrypt(session_key, public_key)
+            # TODO
+            #  Parameters of the cipher must be sent
+            #  (algorithm type, key size, block size, cipher mode, initial vector)
             self.client_socket.send(encrypted_key)
             print("Session key sent!")
         return session_key

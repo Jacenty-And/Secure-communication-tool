@@ -9,21 +9,21 @@ def generate_random_key(size: int) -> bytes:
     return get_random_bytes(size)
 
 
-def encrypt_ECB(message: str, key: bytes) -> bytes:
+def encrypt_ECB(message: bytes, key: bytes) -> bytes:
     cipher = AES.new(key, AES.MODE_ECB)
-    return cipher.encrypt(pad(message.encode(), AES.block_size))
+    return cipher.encrypt(pad(message, AES.block_size))
 
 
-def decrypt_ECB(data: bytes, key: bytes) -> str:
+def decrypt_ECB(data: bytes, key: bytes) -> bytes:
     cipher = AES.new(key, AES.MODE_ECB)
-    return unpad(cipher.decrypt(data), AES.block_size).decode()
+    return unpad(cipher.decrypt(data), AES.block_size)
 
 
-def encrypt_CBC(message: str, key: bytes) -> Tuple[bytes, bytes]:
+def encrypt_CBC(message: bytes, key: bytes) -> Tuple[bytes, bytes]:
     cipher = AES.new(key, AES.MODE_CBC)
-    return cipher.encrypt(pad(message.encode(), AES.block_size)), cipher.iv
+    return cipher.encrypt(pad(message, AES.block_size)), cipher.iv
 
 
-def decrypt_CBC(data: bytes, key: bytes, iv: bytes) -> str:
+def decrypt_CBC(data: bytes, key: bytes, iv: bytes) -> bytes:
     cipher = AES.new(key, AES.MODE_CBC, iv=iv)
-    return unpad(cipher.decrypt(data), AES.block_size).decode()
+    return unpad(cipher.decrypt(data), AES.block_size)
