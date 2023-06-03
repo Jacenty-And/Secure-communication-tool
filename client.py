@@ -1,12 +1,11 @@
 import socket
 
-from rsa_encryption import generate_keys, save_keys, encrypt_private_key, PublicKey
+from rsa_encryption import generate_keys, save_public_key, save_private_key, load_public_key, load_private_key
 from rsa_encryption import encrypt as asym_encrypt
 from rsa_encryption import decrypt as asym_decrypt
+from Crypto.PublicKey.RSA import RsaKey, import_key
 
 from aes_encryption import generate_random_key, encrypt_ECB, decrypt_ECB, encrypt_CBC, decrypt_CBC
-
-from sha_hashing import get_local_key
 
 from threading import Thread
 from queue import Queue
@@ -58,16 +57,6 @@ class Client:
             # public and private keys are generated
             # session key is received from another client
             public_key, private_key = generate_keys()
-            if input("Do you want to save your public and private keys? Y/N ").capitalize() == "Y":
-                path = input("Where do you want to save your keys? ")
-                password = input("Enter the password: ")
-                save_keys(public_key, private_key, path)
-                local_key = get_local_key(password)
-                encrypted_private_key = encrypt_private_key(private_key, local_key)
-                with open(f'{path}2/public_key.pem', 'wb') as file:
-                    file.write(public_key.save_pkcs1('PEM'))
-                with open(f"{path}2/private_key.pem", "wb") as file:
-                    file.write(encrypted_private_key)
             self.send_public_key(public_key)
             encrypted_key = self.client_socket.recv(1024)
             session_key = asym_decrypt(encrypted_key, private_key)
@@ -87,14 +76,14 @@ class Client:
             print("Session key sent!")
         return session_key
 
-    def send_public_key(self, public_key: PublicKey) -> None:
+    def send_public_key(self, public_key: RsaKey) -> None:
         self.client_socket.send("<PUBLIC_KEY>".encode())
-        key_bytes = public_key.save_pkcs1('PEM')
+        key_bytes = public_key.export_key("PEM")
         self.client_socket.sendall(key_bytes)
         self.client_socket.send("<END>".encode())
         print("Public key sent!")
 
-    def receive_public_key(self) -> PublicKey:
+    def receive_public_key(self) -> RsaKey:
         if not self.client_socket.recv(1024).decode().startswith("<PUBLIC_KEY>"):
             print("Public key not received. Exiting the program")
             exit()
@@ -104,10 +93,10 @@ class Client:
             key_bytes += data
         key_bytes = key_bytes.replace(b"<END>", b"")
         print("Public key received!")
-        public_key = PublicKey.load_pkcs1(key_bytes)
+        public_key = import_key(key_bytes)
         return public_key
 
-    def add_message(self, message) -> None:
+    def add_message(self, message: str) -> None:
         self.messages_to_send.put(message)
 
     def get_messages(self) -> list:
@@ -119,16 +108,18 @@ class Client:
     def send_threading(self) -> None:
         while True:
             message = self.messages_to_send.get()
-            ciphertext = encrypt_ECB(message, self.session_key)
+            message_bytes = message.encode()
+            ciphertext = encrypt_ECB(message_bytes, self.session_key)
             self.client_socket.send(ciphertext)
 
     def receive_threading(self) -> None:
         while True:
             try:
                 # Client is trying to receive a message
-                message = self.client_socket.recv(1024)
-                decrypted = decrypt_ECB(message, self.session_key)
-                self.messages_received.put(decrypted)
+                encrypted = self.client_socket.recv(1024)
+                decrypted = decrypt_ECB(encrypted, self.session_key)
+                message = decrypted.decode()
+                self.messages_received.put(message)
             except WindowsError:
                 # If the existing connection is closed, client become a host
                 print("Connection lost!")
