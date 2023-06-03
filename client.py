@@ -1,4 +1,5 @@
 import socket
+from typing import Tuple
 
 from rsa_encryption import generate_keys, save_public_key, save_private_key, load_public_key, load_private_key
 from rsa_encryption import encrypt as asym_encrypt
@@ -56,7 +57,20 @@ class Client:
             # If the client is hosting the connection
             # public and private keys are generated
             # session key is received from another client
-            public_key, private_key = generate_keys()
+            if input("Do you want to load public and private keys? Y/N ").upper() == "Y":
+                try:
+                    public_key, private_key = self.load_rsa_keys()
+                except ValueError:
+                    print("The password is not correct. Exiting the program")
+                    exit()
+                except Exception as e:
+                    print(str(e.args[1]) + ". Exiting the program")
+                    exit()
+            else:
+                print("Generating public and private keys")
+                public_key, private_key = generate_keys()
+                if input("Do you want to save public and private keys? Y/N ").upper() == "Y":
+                    self.save_rsa_keys(public_key, private_key)
             self.send_public_key(public_key)
             encrypted_key = self.client_socket.recv(1024)
             session_key = asym_decrypt(encrypted_key, private_key)
@@ -75,6 +89,23 @@ class Client:
             self.client_socket.send(encrypted_key)
             print("Session key sent!")
         return session_key
+
+    @staticmethod
+    def load_rsa_keys() -> Tuple[RsaKey, RsaKey]:
+        public_key_path = input("Enter the path where the public key is saved: ")
+        public_key = load_public_key(public_key_path)
+        private_key_path = input("Enter the path where the private key is saved: ")
+        password = input("Enter the password to decrypt the private key: ")
+        private_key = load_private_key(private_key_path, password)
+        return public_key, private_key
+
+    @staticmethod
+    def save_rsa_keys(public_key: RsaKey, private_key: RsaKey) -> None:
+        public_key_path = input("Enter the path where to save the public key: ")
+        save_public_key(public_key, public_key_path)
+        private_key_path = input("Enter the path where to save the private key: ")
+        password = input("Enter the password to encrypt the private key: ")
+        save_private_key(private_key, private_key_path, password)
 
     def send_public_key(self, public_key: RsaKey) -> None:
         self.client_socket.send("<PUBLIC_KEY>".encode())
@@ -122,14 +153,33 @@ class Client:
                 self.messages_received.put(message)
             except WindowsError:
                 # If the existing connection is closed, client become a host
+                # TODO Fix reconnecting
+                #  Console inputs for menu and for loading and saving rsa keys overlaps
                 print("Connection lost!")
                 self.client_socket = self.try_host_else_connect()
                 self.session_key = self.generate_or_receive_session_key()
+
+    def console_menu_threading(self) -> None:
+        while True:
+            print("1. Send")
+            print("2. Receive")
+            print("3. Quit")
+            menu = input(": ")
+            if menu == "1":
+                message = input("Message: ")
+                self.add_message(message)
+            elif menu == "2":
+                for message in self.get_messages():
+                    print(message)
+            elif menu == "3":
+                exit()
+
 
     def run(self) -> None:
         if not self.running:
             Thread(target=self.send_threading, daemon=True).start()
             Thread(target=self.receive_threading, daemon=True).start()
+            Thread(target=self.console_menu_threading(), daemon=True).start()
             self.running = True
         else:
             raise Exception("Client can't be run multiple times")
