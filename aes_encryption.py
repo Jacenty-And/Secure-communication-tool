@@ -19,8 +19,8 @@ def decrypt_ECB(data: bytes, key: bytes) -> bytes:
     return unpad(cipher.decrypt(data), AES.block_size)
 
 
-def encrypt_CBC(message: bytes, key: bytes) -> Tuple[bytes, bytes]:
-    cipher = AES.new(key, AES.MODE_CBC)
+def encrypt_CBC(message: bytes, key: bytes, iv: bytes = None) -> Tuple[bytes, bytes]:
+    cipher = AES.new(key, AES.MODE_CBC, iv=iv)
     return cipher.encrypt(pad(message, AES.block_size)), cipher.iv
 
 
