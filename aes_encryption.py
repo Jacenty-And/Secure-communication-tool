@@ -1,12 +1,7 @@
 from typing import Tuple
 
-from Crypto.Random import get_random_bytes
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
-
-
-def generate_random_key(size: int) -> bytes:
-    return get_random_bytes(size)
 
 
 def encrypt_ECB(message: bytes, key: bytes) -> bytes:

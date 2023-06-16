@@ -6,7 +6,7 @@ from rsa_encryption import encrypt as asym_encrypt
 from rsa_encryption import decrypt as asym_decrypt
 from Crypto.PublicKey.RSA import RsaKey, import_key
 
-from aes_encryption import generate_random_key, encrypt_ECB, decrypt_ECB, encrypt_CBC, decrypt_CBC
+from aes_encryption import encrypt_ECB, decrypt_ECB, encrypt_CBC, decrypt_CBC
 from Crypto.Cipher.AES import block_size as aes_block_size
 from Crypto.Random import get_random_bytes
 
@@ -82,6 +82,7 @@ class Client:
                     self.save_rsa_keys(public_key, private_key)
             self.send_public_key(public_key)
             session_key = self.receive_session_key(private_key)
+            print(session_key, public_key, "AES", self.key_size, self.block_size, self.cipher_mode, self.initial_vector)
             print("Session key received!")
         else:
             # If the client is connected to the host
@@ -89,21 +90,16 @@ class Client:
             # session key is generated
             public_key = self.receive_public_key()
             print("Generating session key")
-            # while True:
-            #     key_size = int(input("Enter the session key size [32, 512, 1024, 2048]: "))
-            #     if key_size in [32, 512, 1024, 2048]:
-            #         break
-            #     print("Wrong value! Select key size from printed values")
             key_size = 32
-            session_key = generate_random_key(key_size)
-            # while True:
-            #     cipher_mode = input("Enter the cipher mode [ECB, CBC]: ")
-            #     if cipher_mode in ["ECB", "CBC"]:
-            #         break
-            #     print("Wrong cipher mode! Select cipher mode from printed modes")
-            cipher_mode = "ECB"
+            session_key = get_random_bytes(key_size)
+            while True:
+                cipher_mode = input("Enter the cipher mode [ECB, CBC]: ")
+                if cipher_mode in ["ECB", "CBC"]:
+                    break
+                print("Wrong cipher mode! Select cipher mode from printed modes")
             initial_vector = get_random_bytes(aes_block_size)
             self.send_session_key(session_key, public_key, "AES", key_size, aes_block_size, cipher_mode, initial_vector)
+            print(session_key, public_key, "AES", self.key_size, self.block_size, self.cipher_mode, self.initial_vector)
             print("Session key sent!")
         return session_key
 
@@ -153,45 +149,41 @@ class Client:
                          key_size: int,
                          block_size: int,
                          cipher_mode: str,
-                         initial_vector: bytes) -> None:
-        # encrypted = asym_encrypt(b"<CIPHER_PARAMS>", public_key)
-        # print("<CIPHER_PARAMS>", len(b"<CIPHER_PARAMS>"))
-        # print("encrypted", len(encrypted))
-        # self.client_socket.send(encrypted)
-        #
-        # encrypted = asym_encrypt(b"<ALGORITHM_TYPE>", public_key)
-        # print("<ALGORITHM_TYPE>", len(b"<ALGORITHM_TYPE>"))
-        # print("encrypted", len(encrypted))
-        # self.client_socket.sendall(encrypted)
-        # self.algorithm_type = algorithm_type
-        # encrypted = asym_encrypt(algorithm_type.encode(), public_key)
-        # self.client_socket.send(encrypted)
-        #
-        # encrypted = asym_encrypt(b"<KEY_SIZE>", public_key)
-        # self.client_socket.send(encrypted)
-        # self.key_size = key_size
-        # key_size_bytes = key_size.to_bytes(64, "little")
-        # encrypted = asym_encrypt(key_size_bytes, public_key)
-        # self.client_socket.send(encrypted)
-        #
-        # encrypted = asym_encrypt(b"<BLOCK_SIZE>", public_key)
-        # self.client_socket.send(encrypted)
-        # self.block_size = block_size
-        # block_size_bytes = block_size.to_bytes(64, "little")
-        # encrypted = asym_encrypt(block_size_bytes, public_key)
-        # self.client_socket.send(encrypted)
-        #
-        # encrypted = asym_encrypt(b"<CIPHER_MODE>", public_key)
-        # self.client_socket.send(encrypted)
-        # self.cipher_mode = cipher_mode
-        # encrypted = asym_encrypt(cipher_mode.encode(), public_key)
-        # self.client_socket.send(encrypted)
-        #
-        # encrypted = asym_encrypt(b"<INITIAL_VECTOR>", public_key)
-        # self.client_socket.send(encrypted)
-        # self.initial_vector = initial_vector
-        # encrypted = asym_encrypt(initial_vector, public_key)
-        # self.client_socket.send(encrypted)
+                         initial_vector: bytes = None) -> None:
+        encrypted = asym_encrypt(b"<CIPHER_PARAMS>", public_key)
+        self.client_socket.send(encrypted)
+
+        encrypted = asym_encrypt(b"<ALGORITHM_TYPE>", public_key)
+        self.client_socket.send(encrypted)
+        self.algorithm_type = algorithm_type
+        encrypted = asym_encrypt(algorithm_type.encode(), public_key)
+        self.client_socket.send(encrypted)
+
+        encrypted = asym_encrypt(b"<KEY_SIZE>", public_key)
+        self.client_socket.send(encrypted)
+        self.key_size = key_size
+        key_size_bytes = key_size.to_bytes(64, "little")
+        encrypted = asym_encrypt(key_size_bytes, public_key)
+        self.client_socket.send(encrypted)
+
+        encrypted = asym_encrypt(b"<BLOCK_SIZE>", public_key)
+        self.client_socket.send(encrypted)
+        self.block_size = block_size
+        block_size_bytes = block_size.to_bytes(64, "little")
+        encrypted = asym_encrypt(block_size_bytes, public_key)
+        self.client_socket.send(encrypted)
+
+        encrypted = asym_encrypt(b"<CIPHER_MODE>", public_key)
+        self.client_socket.send(encrypted)
+        self.cipher_mode = cipher_mode
+        encrypted = asym_encrypt(cipher_mode.encode(), public_key)
+        self.client_socket.send(encrypted)
+
+        encrypted = asym_encrypt(b"<INITIAL_VECTOR>", public_key)
+        self.client_socket.send(encrypted)
+        self.initial_vector = initial_vector
+        encrypted = asym_encrypt(initial_vector, public_key)
+        self.client_socket.send(encrypted)
 
         print("session_key: ", session_key)
         print("len: ", len(session_key))
@@ -204,52 +196,51 @@ class Client:
         self.client_socket.send(encrypted)
 
     def receive_session_key(self, private_key: RsaKey) -> bytes:
-        # received = self.client_socket.recv(1024)
-        # print("received", len(received))
-        # decrypted = asym_decrypt(received, private_key)
-        # print("decrypted", decrypted)
-        # if not decrypted.decode().startswith("<CIPHER_PARAMS>"):
-        #     print("Cipher params not received. Exiting the program")
-        #     exit()
-        #
-        # received = self.client_socket.recv(1024)
-        # print("received", len(received))
-        # # TODO Fix the error ValueError("Ciphertext with incorrect length.")
-        # decrypted = asym_decrypt(received, private_key)
-        # if not decrypted.decode().startswith("<ALGORITHM_TYPE>"):
-        #     print("Algorithm type not received. Exiting the program")
-        #     exit()
-        # decrypted = asym_decrypt(self.client_socket.recv(1024), private_key)
-        # self.algorithm_type = decrypted.decode()
-        #
-        # decrypted = asym_decrypt(self.client_socket.recv(1024), private_key)
-        # if not decrypted.decode().startswith("<KEY_SIZE>"):
-        #     print("Key size not received. Exiting the program")
-        #     exit()
-        # decrypted = asym_decrypt(self.client_socket.recv(1024), private_key)
-        # self.key_size = int.from_bytes(decrypted, byteorder='little')
-        #
-        # decrypted = asym_decrypt(self.client_socket.recv(1024), private_key)
-        # if not decrypted.decode().startswith("<BLOCK_SIZE>"):
-        #     print("Block size not received. Exiting the program")
-        #     exit()
-        # decrypted = asym_decrypt(self.client_socket.recv(1024), private_key)
-        # self.block_size = int.from_bytes(decrypted, byteorder='little')
-        #
-        # decrypted = asym_decrypt(self.client_socket.recv(1024), private_key)
-        # if not decrypted.decode().startswith("<CIPHER_MODE>"):
-        #     print("Cipher mode not received. Exiting the program")
-        #     exit()
-        # decrypted = asym_decrypt(self.client_socket.recv(1024), private_key)
-        # self.cipher_mode = decrypted.decode()
-        #
-        # decrypted = asym_decrypt(self.client_socket.recv(1024), private_key)
-        # if not decrypted.decode().startswith("<INITIAL_VECTOR>"):
-        #     print("Initial vector not received. Exiting the program")
-        #     exit()
-        # self.initial_vector = asym_decrypt(self.client_socket.recv(1024), private_key)
+        received = self.client_socket.recv(128)
+        print("received", len(received))
+        decrypted = asym_decrypt(received, private_key)
+        print("decrypted", decrypted)
+        if not decrypted.decode().startswith("<CIPHER_PARAMS>"):
+            print("Cipher params not received. Exiting the program")
+            exit()
 
-        received = self.client_socket.recv(1024)
+        received = self.client_socket.recv(128)
+        print("received", len(received))
+        decrypted = asym_decrypt(received, private_key)
+        if not decrypted.decode().startswith("<ALGORITHM_TYPE>"):
+            print("Algorithm type not received. Exiting the program")
+            exit()
+        decrypted = asym_decrypt(self.client_socket.recv(128), private_key)
+        self.algorithm_type = decrypted.decode()
+
+        decrypted = asym_decrypt(self.client_socket.recv(128), private_key)
+        if not decrypted.decode().startswith("<KEY_SIZE>"):
+            print("Key size not received. Exiting the program")
+            exit()
+        decrypted = asym_decrypt(self.client_socket.recv(128), private_key)
+        self.key_size = int.from_bytes(decrypted, byteorder='little')
+
+        decrypted = asym_decrypt(self.client_socket.recv(128), private_key)
+        if not decrypted.decode().startswith("<BLOCK_SIZE>"):
+            print("Block size not received. Exiting the program")
+            exit()
+        decrypted = asym_decrypt(self.client_socket.recv(128), private_key)
+        self.block_size = int.from_bytes(decrypted, byteorder='little')
+
+        decrypted = asym_decrypt(self.client_socket.recv(128), private_key)
+        if not decrypted.decode().startswith("<CIPHER_MODE>"):
+            print("Cipher mode not received. Exiting the program")
+            exit()
+        decrypted = asym_decrypt(self.client_socket.recv(128), private_key)
+        self.cipher_mode = decrypted.decode()
+
+        decrypted = asym_decrypt(self.client_socket.recv(128), private_key)
+        if not decrypted.decode().startswith("<INITIAL_VECTOR>"):
+            print("Initial vector not received. Exiting the program")
+            exit()
+        self.initial_vector = asym_decrypt(self.client_socket.recv(128), private_key)
+
+        received = self.client_socket.recv(128)
         print("received: ", received)
         print("len: ", len(received))
         decrypted = asym_decrypt(received, private_key)
