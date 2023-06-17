@@ -22,28 +22,25 @@ class Client:
         self.messages_to_send = Queue()
         self.messages_received = Queue()
 
-        self.is_hosting = None
-        self.client_socket = self.try_host_else_connect()
+        self.client_socket, self.is_hosting = self.try_host_else_connect()
 
-        self.algorithm_type = None
-        self.key_size = None
-        self.block_size = None
-        self.cipher_mode = None
-        self.initial_vector = None
-        self.session_key = self.generate_or_receive_session_key()
+        self.algorithm_type, self.key_size, self.block_size, self.cipher_mode, self.initial_vector, self.session_key = \
+            self.generate_or_receive_session_key_and_params()
+        self.sym_encrypt = encrypt_ECB if self.cipher_mode == "ECB" else encrypt_CBC
+        self.sym_decrypt = decrypt_ECB if self.cipher_mode == "ECB" else decrypt_CBC
 
         self.running = False
 
-    def try_host_else_connect(self) -> socket.socket:
+    def try_host_else_connect(self) -> Tuple[socket.socket, bool]:
         try:
             # Client is hosting the connection if possible
             client_socket = self.host()
-            self.is_hosting = True
+            is_hosting = True
         except WindowsError:
             # If there is already a host, client is connecting to it
             client_socket = self.connect()
-            self.is_hosting = False
-        return client_socket
+            is_hosting = False
+        return client_socket, is_hosting
 
     def host(self) -> socket.socket:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
@@ -61,7 +58,7 @@ class Client:
         print("I connected to the host!")
         return client_socket
 
-    def generate_or_receive_session_key(self) -> bytes:
+    def generate_or_receive_session_key_and_params(self) -> Tuple[str, int, int, str, bytes, bytes]:
         if self.is_hosting:
             # If the client is hosting the connection
             # public and private keys are generated
@@ -81,8 +78,8 @@ class Client:
                 if input("Do you want to save public and private keys? Y/N ").upper() == "Y":
                     self.save_rsa_keys(public_key, private_key)
             self.send_public_key(public_key)
-            session_key = self.receive_session_key(private_key)
-            print(session_key, public_key, "AES", self.key_size, self.block_size, self.cipher_mode, self.initial_vector)
+            algorithm_type, key_size, block_size, cipher_mode, initial_vector, session_key = \
+                self.receive_session_key_and_params(private_key)
             print("Session key received!")
         else:
             # If the client is connected to the host
@@ -97,17 +94,20 @@ class Client:
                 if cipher_mode in ["ECB", "CBC"]:
                     break
                 print("Wrong cipher mode! Select cipher mode from printed modes")
+            algorithm_type = "AES"
+            block_size = aes_block_size
             initial_vector = get_random_bytes(aes_block_size)
-            self.send_session_key(session_key, public_key, "AES", key_size, aes_block_size, cipher_mode, initial_vector)
-            print(session_key, public_key, "AES", self.key_size, self.block_size, self.cipher_mode, self.initial_vector)
+            self.send_session_key(session_key, public_key, algorithm_type, key_size,
+                                  block_size, cipher_mode, initial_vector)
             print("Session key sent!")
-        return session_key
+        return algorithm_type, key_size, block_size, cipher_mode, initial_vector, session_key
 
     @staticmethod
     def load_rsa_keys() -> Tuple[RsaKey, RsaKey]:
         public_key_path = input("Enter the path where the public key is saved: ")
         public_key = load_public_key(public_key_path)
         private_key_path = input("Enter the path where the private key is saved: ")
+        # TODO secure password input
         password = input("Enter the password to decrypt the private key: ")
         private_key = load_private_key(private_key_path, password)
         return public_key, private_key
@@ -123,7 +123,7 @@ class Client:
     def send_public_key(self, public_key: RsaKey) -> None:
         self.client_socket.send(b"<PUBLIC_KEY>")
         key_bytes = public_key.export_key("PEM")
-        print("key_bytes: ", key_bytes)
+        print("key_bytes:\n", key_bytes)
         self.client_socket.sendall(key_bytes)
         self.client_socket.send(b"<END>")
         print("Public key sent!")
@@ -138,18 +138,12 @@ class Client:
             key_bytes += data
         key_bytes = key_bytes.replace(b"<END>", b"")
         print("Public key received!")
-        print("key_bytes: ", key_bytes)
+        print("key_bytes:\n", key_bytes)
         public_key = import_key(key_bytes)
         return public_key
 
-    def send_session_key(self,
-                         session_key: bytes,
-                         public_key: RsaKey,
-                         algorithm_type: str,
-                         key_size: int,
-                         block_size: int,
-                         cipher_mode: str,
-                         initial_vector: bytes = None) -> None:
+    def send_session_key(self, session_key: bytes, public_key: RsaKey, algorithm_type: str, key_size: int,
+                         block_size: int, cipher_mode: str, initial_vector: bytes = None) -> None:
         encrypted = asym_encrypt(b"<CIPHER_PARAMS>", public_key)
         self.client_socket.send(encrypted)
 
@@ -185,8 +179,6 @@ class Client:
         encrypted = asym_encrypt(initial_vector, public_key)
         self.client_socket.send(encrypted)
 
-        print("session_key: ", session_key)
-        print("len: ", len(session_key))
         encrypted = asym_encrypt(b"<SESSION_KEY>", public_key)
         self.client_socket.send(encrypted)
         encrypted = asym_encrypt(session_key, public_key)
@@ -195,73 +187,53 @@ class Client:
         encrypted = asym_encrypt(b"<END>", public_key)
         self.client_socket.send(encrypted)
 
-    def receive_session_key(self, private_key: RsaKey) -> bytes:
+    def receive_session_key_and_params(self, private_key: RsaKey) -> Tuple[str, int, int, str, bytes, bytes]:
+
+        def receive_and_decrypt(message_header: str) -> bytes:
+            recv = self.client_socket.recv(128)
+            dec = asym_decrypt(recv, private_key)
+            if not dec.decode().startswith(message_header):
+                message_text = message_header.strip("<>").replace("_", " ").capitalize()
+                print(f"{message_text} not received. Exiting the program")
+                exit()
+            recv = self.client_socket.recv(128)
+            dec = asym_decrypt(recv, private_key)
+            return dec
+
         received = self.client_socket.recv(128)
-        print("received", len(received))
         decrypted = asym_decrypt(received, private_key)
-        print("decrypted", decrypted)
         if not decrypted.decode().startswith("<CIPHER_PARAMS>"):
             print("Cipher params not received. Exiting the program")
             exit()
 
-        received = self.client_socket.recv(128)
-        print("received", len(received))
-        decrypted = asym_decrypt(received, private_key)
-        if not decrypted.decode().startswith("<ALGORITHM_TYPE>"):
-            print("Algorithm type not received. Exiting the program")
-            exit()
-        decrypted = asym_decrypt(self.client_socket.recv(128), private_key)
-        self.algorithm_type = decrypted.decode()
+        received = receive_and_decrypt("<ALGORITHM_TYPE>")
+        algorithm_type = received.decode()
 
-        decrypted = asym_decrypt(self.client_socket.recv(128), private_key)
-        if not decrypted.decode().startswith("<KEY_SIZE>"):
-            print("Key size not received. Exiting the program")
-            exit()
-        decrypted = asym_decrypt(self.client_socket.recv(128), private_key)
-        self.key_size = int.from_bytes(decrypted, byteorder='little')
+        received = receive_and_decrypt("<KEY_SIZE>")
+        key_size = int.from_bytes(received, byteorder='little')
 
-        decrypted = asym_decrypt(self.client_socket.recv(128), private_key)
-        if not decrypted.decode().startswith("<BLOCK_SIZE>"):
-            print("Block size not received. Exiting the program")
-            exit()
-        decrypted = asym_decrypt(self.client_socket.recv(128), private_key)
-        self.block_size = int.from_bytes(decrypted, byteorder='little')
+        received = receive_and_decrypt("<BLOCK_SIZE>")
+        block_size = int.from_bytes(received, byteorder='little')
 
-        decrypted = asym_decrypt(self.client_socket.recv(128), private_key)
-        if not decrypted.decode().startswith("<CIPHER_MODE>"):
-            print("Cipher mode not received. Exiting the program")
-            exit()
-        decrypted = asym_decrypt(self.client_socket.recv(128), private_key)
-        self.cipher_mode = decrypted.decode()
+        received = receive_and_decrypt("<CIPHER_MODE>")
+        cipher_mode = received.decode()
 
-        decrypted = asym_decrypt(self.client_socket.recv(128), private_key)
-        if not decrypted.decode().startswith("<INITIAL_VECTOR>"):
-            print("Initial vector not received. Exiting the program")
-            exit()
-        self.initial_vector = asym_decrypt(self.client_socket.recv(128), private_key)
+        received = receive_and_decrypt("<INITIAL_VECTOR>")
+        initial_vector = received
 
         received = self.client_socket.recv(128)
-        print("received: ", received)
-        print("len: ", len(received))
         decrypted = asym_decrypt(received, private_key)
-        print("decrypted: ", decrypted)
         if not decrypted.decode().startswith("<SESSION_KEY>"):
             print("Session key not received. Exiting the program")
             exit()
         key_bytes = b""
         while True:
             data = self.client_socket.recv(128)
-            print("data: ", data)
-            print("len: ", len(data))
-            decrypted = asym_decrypt(data, private_key)
-            print("decrypted: ", decrypted)
-            key_bytes += decrypted
+            key_bytes += asym_decrypt(data, private_key)
             if key_bytes[-5:] == b"<END>":
                 break
         session_key = key_bytes.replace(b"<END>", b"")
-        print("session_key: ", session_key)
-        print("len: ", len(session_key))
-        return session_key
+        return algorithm_type, key_size, block_size, cipher_mode, initial_vector, session_key
 
     def add_message(self, message: str) -> None:
         self.messages_to_send.put(message)
@@ -276,7 +248,7 @@ class Client:
         while True:
             message = self.messages_to_send.get()
             message_bytes = message.encode()
-            ciphertext = encrypt_ECB(message_bytes, self.session_key)
+            ciphertext = self.sym_encrypt(message_bytes, self.session_key, self.initial_vector)
             self.client_socket.send(ciphertext)
 
     def receive_threading(self) -> None:
@@ -284,7 +256,7 @@ class Client:
             try:
                 # Client is trying to receive a message
                 encrypted = self.client_socket.recv(1024)
-                decrypted = decrypt_ECB(encrypted, self.session_key)
+                decrypted = self.sym_decrypt(encrypted, self.session_key, self.initial_vector)
                 message = decrypted.decode()
                 self.messages_received.put(message)
             except WindowsError:
@@ -293,7 +265,7 @@ class Client:
                 #  Console inputs for menu and for loading and saving rsa keys overlaps
                 print("Connection lost!")
                 self.client_socket = self.try_host_else_connect()
-                self.session_key = self.generate_or_receive_session_key()
+                self.session_key = self.generate_or_receive_session_key_and_params()
 
     def console_menu_threading(self) -> None:
         while True:
