@@ -13,6 +13,10 @@ from Crypto.Random import get_random_bytes
 from threading import Thread
 from queue import Queue
 
+from tqdm import tqdm
+
+FILE_PARTITION_SIZE = 1_048_576  # MB
+
 
 class Client:
     def __init__(self, host, port):
@@ -21,6 +25,8 @@ class Client:
 
         self.messages_to_send = Queue()
         self.messages_received = Queue()
+        self.files_to_send = Queue()
+        self.files_received = Queue()
 
         self.client_socket, self.is_hosting = self.try_host_else_connect()
 
@@ -123,7 +129,6 @@ class Client:
     def send_public_key(self, public_key: RsaKey) -> None:
         self.client_socket.send(b"<PUBLIC_KEY>")
         key_bytes = public_key.export_key("PEM")
-        print("key_bytes:\n", key_bytes)
         self.client_socket.sendall(key_bytes)
         self.client_socket.send(b"<END>")
         print("Public key sent!")
@@ -138,7 +143,6 @@ class Client:
             key_bytes += data
         key_bytes = key_bytes.replace(b"<END>", b"")
         print("Public key received!")
-        print("key_bytes:\n", key_bytes)
         public_key = import_key(key_bytes)
         return public_key
 
@@ -230,28 +234,29 @@ class Client:
         while True:
             data = self.client_socket.recv(128)
             key_bytes += asym_decrypt(data, private_key)
+            # TODO end receiving based on sent session key size
             if key_bytes[-5:] == b"<END>":
                 break
         session_key = key_bytes.replace(b"<END>", b"")
         return algorithm_type, key_size, block_size, cipher_mode, initial_vector, session_key
 
-    def add_message(self, message: str) -> None:
+    def add_message_to_send(self, message: str) -> None:
         self.messages_to_send.put(message)
 
-    def get_messages(self) -> list:
+    def get_messages_received(self) -> list:
         messages = list()
         while not self.messages_received.empty():
             messages.append(self.messages_received.get())
         return messages
 
-    def send_threading(self) -> None:
+    def send_messages_threading(self) -> None:
         while True:
             message = self.messages_to_send.get()
             message_bytes = message.encode()
             ciphertext = self.sym_encrypt(message_bytes, self.session_key, self.initial_vector)
-            self.client_socket.send(ciphertext)
+            self.client_socket.sendall(ciphertext)
 
-    def receive_threading(self) -> None:
+    def receive_messages_threading(self) -> None:
         while True:
             try:
                 # Client is trying to receive a message
@@ -267,26 +272,98 @@ class Client:
                 self.client_socket = self.try_host_else_connect()
                 self.session_key = self.generate_or_receive_session_key_and_params()
 
-    def console_menu_threading(self) -> None:
+    def add_file_to_send(self, file_path: str) -> None:
+        file_name = file_path.split("/")[-1]
+        with open(file_path, "rb") as file:
+            file_bytes = file.read()
+        file = (file_name, file_bytes)
+        self.files_to_send.put(file)
+
+    def get_file_received(self) -> bytes:
+        pass
+
+    def send_files_threading(self) -> None:
+        while True:
+            file_name, file_bytes = self.files_to_send.get()
+
+            file_name_bytes = file_name.encode()
+            ciphertext = self.sym_encrypt(file_name_bytes, self.session_key, self.initial_vector)
+            self.client_socket.sendall(ciphertext)
+
+            print("Encrypting the file...")
+            ciphered_file_bytes = self.sym_encrypt(file_bytes, self.session_key, self.initial_vector)
+            print("File encrypted!")
+            ciphered_file_size = len(ciphered_file_bytes)
+
+            file_size_bytes = ciphered_file_size.to_bytes(64, "little")
+            ciphertext = self.sym_encrypt(file_size_bytes, self.session_key, self.initial_vector)
+            self.client_socket.sendall(ciphertext)
+
+            progress = tqdm(range(ciphered_file_size), f"Sending {file_name}",
+                            unit="B", unit_scale=True, unit_divisor=1024)
+            send_size = FILE_PARTITION_SIZE
+            partitioned_data = [ciphered_file_bytes[i:i+send_size] for i in range(0, ciphered_file_size, send_size)]
+            for data in partitioned_data:
+                self.client_socket.sendall(data)
+                progress.update(len(data))
+            print("File sent!")
+
+    def receive_files_threading(self) -> None:
+        while True:
+            received = self.client_socket.recv(1024)
+            decrypted = self.sym_decrypt(received, self.session_key, self.initial_vector)
+            file_name = decrypted.decode()
+
+            received = self.client_socket.recv(1024)
+            decrypted = self.sym_decrypt(received, self.session_key, self.initial_vector)
+            file_size = int.from_bytes(decrypted, byteorder='little')
+
+            progress = tqdm(range(file_size), f"Receiving {file_name}",
+                            unit="B", unit_scale=True, unit_divisor=1024)
+            file_bytes = b""
+            while True:
+                data = self.client_socket.recv(FILE_PARTITION_SIZE)
+                file_bytes += data
+                progress.update(len(data))
+                if len(file_bytes) == file_size:
+                    break
+
+            print("Decrypting the file...")
+            decrypted_file = self.sym_decrypt(file_bytes, self.session_key, self.initial_vector)
+            print("File decrypted!")
+
+            print("Saving the file...")
+            with open(f"received/{file_name}", "wb") as file:
+                file.write(decrypted_file)
+            print("File saved!")
+
+    # TODO Find a better way to print the console menu, so it won't collide with other communicates
+    def console_menu_loop(self) -> None:
         while True:
             print("1. Send")
             print("2. Receive")
-            print("3. Quit")
+            print("3. Send file")
+            print("4. Quit")
             menu = input(": ")
             if menu == "1":
                 message = input("Message: ")
-                self.add_message(message)
+                self.add_message_to_send(message)
             elif menu == "2":
-                for message in self.get_messages():
+                for message in self.get_messages_received():
                     print(message)
             elif menu == "3":
+                file_path = input("File path: ")
+                self.add_file_to_send(file_path)
+            elif menu == "4":
                 exit()
 
     def run(self) -> None:
         if not self.running:
-            Thread(target=self.send_threading, daemon=True).start()
-            Thread(target=self.receive_threading, daemon=True).start()
-            Thread(target=self.console_menu_threading(), daemon=True).start()
+            # TODO Tag sent data to separate messages and files
+            # Thread(target=self.send_messages_threading, daemon=True).start()
+            # Thread(target=self.receive_messages_threading, daemon=True).start()
+            Thread(target=self.send_files_threading, daemon=True).start()
+            Thread(target=self.receive_files_threading, daemon=True).start()
             self.running = True
         else:
             raise Exception("Client can't be run multiple times")
