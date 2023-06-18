@@ -134,7 +134,8 @@ class Client:
         print("Public key sent!")
 
     def receive_public_key(self) -> RsaKey:
-        if not self.client_socket.recv(1024).decode().startswith("<PUBLIC_KEY>"):
+        received = self.client_socket.recv(1024)
+        if not received.decode().startswith("<PUBLIC_KEY>"):
             print("Public key not received. Exiting the program")
             exit()
         key_bytes = b""
@@ -240,6 +241,33 @@ class Client:
         session_key = key_bytes.replace(b"<END>", b"")
         return algorithm_type, key_size, block_size, cipher_mode, initial_vector, session_key
 
+    def receive_threading(self):
+        while True:
+            try:
+                # Client is trying to receive a message
+                encrypted = self.client_socket.recv(1024)
+                decrypted = self.sym_decrypt(encrypted, self.session_key, self.initial_vector)
+                if decrypted == b"<MESSAGE>":
+                    self.receive_message()
+                elif decrypted == b"<FILE>":
+                    self.receive_file()
+                else:
+                    print("Incorrect data received. Exiting the program")
+                    exit()
+            except WindowsError:
+                # If the existing connection is closed, client become a host
+                # TODO Fix reconnecting
+                #  Console inputs for menu and for loading and saving rsa keys overlaps
+                print("Connection lost!")
+                self.reconnect()
+
+    def reconnect(self) -> None:
+        self.client_socket, self.is_hosting = self.try_host_else_connect()
+        self.algorithm_type, self.key_size, self.block_size, self.cipher_mode, self.initial_vector, self.session_key \
+            = self.generate_or_receive_session_key_and_params()
+        self.sym_encrypt = encrypt_ECB if self.cipher_mode == "ECB" else encrypt_CBC
+        self.sym_decrypt = decrypt_ECB if self.cipher_mode == "ECB" else decrypt_CBC
+
     def add_message_to_send(self, message: str) -> None:
         self.messages_to_send.put(message)
 
@@ -252,25 +280,19 @@ class Client:
     def send_messages_threading(self) -> None:
         while True:
             message = self.messages_to_send.get()
+
+            ciphertext = self.sym_encrypt(b"<MESSAGE>", self.session_key, self.initial_vector)
+            self.client_socket.sendall(ciphertext)
+
             message_bytes = message.encode()
             ciphertext = self.sym_encrypt(message_bytes, self.session_key, self.initial_vector)
             self.client_socket.sendall(ciphertext)
 
-    def receive_messages_threading(self) -> None:
-        while True:
-            try:
-                # Client is trying to receive a message
-                encrypted = self.client_socket.recv(1024)
-                decrypted = self.sym_decrypt(encrypted, self.session_key, self.initial_vector)
-                message = decrypted.decode()
-                self.messages_received.put(message)
-            except WindowsError:
-                # If the existing connection is closed, client become a host
-                # TODO Fix reconnecting
-                #  Console inputs for menu and for loading and saving rsa keys overlaps
-                print("Connection lost!")
-                self.client_socket = self.try_host_else_connect()
-                self.session_key = self.generate_or_receive_session_key_and_params()
+    def receive_message(self) -> None:
+        encrypted = self.client_socket.recv(1024)
+        decrypted = self.sym_decrypt(encrypted, self.session_key, self.initial_vector)
+        message = decrypted.decode()
+        self.messages_received.put(message)
 
     def add_file_to_send(self, file_path: str) -> None:
         file_name = file_path.split("/")[-1]
@@ -285,6 +307,9 @@ class Client:
     def send_files_threading(self) -> None:
         while True:
             file_name, file_bytes = self.files_to_send.get()
+
+            ciphertext = self.sym_encrypt(b"<FILE>", self.session_key, self.initial_vector)
+            self.client_socket.sendall(ciphertext)
 
             file_name_bytes = file_name.encode()
             ciphertext = self.sym_encrypt(file_name_bytes, self.session_key, self.initial_vector)
@@ -302,40 +327,39 @@ class Client:
             progress = tqdm(range(ciphered_file_size), f"Sending {file_name}",
                             unit="B", unit_scale=True, unit_divisor=1024)
             send_size = FILE_PARTITION_SIZE
-            partitioned_data = [ciphered_file_bytes[i:i+send_size] for i in range(0, ciphered_file_size, send_size)]
+            partitioned_data = [ciphered_file_bytes[i:i + send_size] for i in range(0, ciphered_file_size, send_size)]
             for data in partitioned_data:
                 self.client_socket.sendall(data)
                 progress.update(len(data))
             print("File sent!")
 
-    def receive_files_threading(self) -> None:
+    def receive_file(self) -> None:
+        received = self.client_socket.recv(1024)
+        decrypted = self.sym_decrypt(received, self.session_key, self.initial_vector)
+        file_name = decrypted.decode()
+
+        received = self.client_socket.recv(1024)
+        decrypted = self.sym_decrypt(received, self.session_key, self.initial_vector)
+        file_size = int.from_bytes(decrypted, byteorder='little')
+
+        progress = tqdm(range(file_size), f"Receiving {file_name}",
+                        unit="B", unit_scale=True, unit_divisor=1024)
+        file_bytes = b""
         while True:
-            received = self.client_socket.recv(1024)
-            decrypted = self.sym_decrypt(received, self.session_key, self.initial_vector)
-            file_name = decrypted.decode()
+            data = self.client_socket.recv(FILE_PARTITION_SIZE)
+            file_bytes += data
+            progress.update(len(data))
+            if len(file_bytes) == file_size:
+                break
 
-            received = self.client_socket.recv(1024)
-            decrypted = self.sym_decrypt(received, self.session_key, self.initial_vector)
-            file_size = int.from_bytes(decrypted, byteorder='little')
+        print("Decrypting the file...")
+        decrypted_file = self.sym_decrypt(file_bytes, self.session_key, self.initial_vector)
+        print("File decrypted!")
 
-            progress = tqdm(range(file_size), f"Receiving {file_name}",
-                            unit="B", unit_scale=True, unit_divisor=1024)
-            file_bytes = b""
-            while True:
-                data = self.client_socket.recv(FILE_PARTITION_SIZE)
-                file_bytes += data
-                progress.update(len(data))
-                if len(file_bytes) == file_size:
-                    break
-
-            print("Decrypting the file...")
-            decrypted_file = self.sym_decrypt(file_bytes, self.session_key, self.initial_vector)
-            print("File decrypted!")
-
-            print("Saving the file...")
-            with open(f"received/{file_name}", "wb") as file:
-                file.write(decrypted_file)
-            print("File saved!")
+        print("Saving the file...")
+        with open(f"received/{file_name}", "wb") as file:
+            file.write(decrypted_file)
+        print("File saved!")
 
     # TODO Find a better way to print the console menu, so it won't collide with other communicates
     def console_menu_loop(self) -> None:
@@ -359,11 +383,9 @@ class Client:
 
     def run(self) -> None:
         if not self.running:
-            # TODO Tag sent data to separate messages and files
-            # Thread(target=self.send_messages_threading, daemon=True).start()
-            # Thread(target=self.receive_messages_threading, daemon=True).start()
+            Thread(target=self.send_messages_threading, daemon=True).start()
             Thread(target=self.send_files_threading, daemon=True).start()
-            Thread(target=self.receive_files_threading, daemon=True).start()
+            Thread(target=self.receive_threading, daemon=True).start()
             self.running = True
         else:
             raise Exception("Client can't be run multiple times")
