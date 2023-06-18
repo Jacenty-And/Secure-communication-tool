@@ -35,7 +35,7 @@ class Client:
         self.sym_encrypt = encrypt_ECB if self.cipher_mode == "ECB" else encrypt_CBC
         self.sym_decrypt = decrypt_ECB if self.cipher_mode == "ECB" else decrypt_CBC
 
-        self.reconnect_event = Event()
+        self.console_menu_stop = Event()
         self.running = False
 
     def try_host_else_connect(self) -> Tuple[socket.socket, bool]:
@@ -263,13 +263,13 @@ class Client:
                 self.reconnect()
 
     def reconnect(self) -> None:
-        self.reconnect_event.set()
+        self.console_menu_stop.set()
         self.client_socket, self.is_hosting = self.try_host_else_connect()
         self.algorithm_type, self.key_size, self.block_size, self.cipher_mode, self.initial_vector, self.session_key \
             = self.generate_or_receive_session_key_and_params()
         self.sym_encrypt = encrypt_ECB if self.cipher_mode == "ECB" else encrypt_CBC
         self.sym_decrypt = decrypt_ECB if self.cipher_mode == "ECB" else decrypt_CBC
-        self.reconnect_event = Event()
+        self.console_menu_stop = Event()
 
     def add_message_to_send(self, message: str) -> None:
         self.messages_to_send.put(message)
@@ -299,10 +299,14 @@ class Client:
 
     def add_file_to_send(self, file_path: str) -> None:
         file_name = file_path.split("/")[-1]
+        self.console_menu_stop.set()
+        print("Reading the file...")
         with open(file_path, "rb") as file:
             file_bytes = file.read()
+        print("File read!")
         file = (file_name, file_bytes)
         self.files_to_send.put(file)
+        self.console_menu_stop = Event()
 
     def get_file_received(self) -> bytes:
         pass
@@ -311,6 +315,7 @@ class Client:
         while True:
             file_name, file_bytes = self.files_to_send.get()
 
+            self.console_menu_stop.set()
             ciphertext = self.sym_encrypt(b"<FILE>", self.session_key, self.initial_vector)
             self.client_socket.sendall(ciphertext)
 
@@ -334,7 +339,10 @@ class Client:
             for data in partitioned_data:
                 self.client_socket.sendall(data)
                 progress.update(len(data))
+            progress.close()
+            del progress
             print("File sent!")
+            self.console_menu_stop = Event()
 
     def receive_file(self) -> None:
         received = self.client_socket.recv(1024)
@@ -354,6 +362,8 @@ class Client:
             progress.update(len(data))
             if len(file_bytes) == file_size:
                 break
+        progress.close()
+        del progress
 
         print("Decrypting the file...")
         decrypted_file = self.sym_decrypt(file_bytes, self.session_key, self.initial_vector)
@@ -364,10 +374,10 @@ class Client:
             file.write(decrypted_file)
         print("File saved!")
 
-    # TODO Find a better way to print the console menu, so it won't collide with other communicates
+    # TODO Cancel menu input after reconnecting
     def console_menu_loop(self) -> None:
         while True:
-            if self.reconnect_event.is_set():
+            if self.console_menu_stop.is_set():
                 continue
             print("1. Send")
             print("2. Receive")
