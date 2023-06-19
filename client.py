@@ -15,6 +15,8 @@ from queue import Queue
 
 from tqdm import tqdm
 
+import gc
+
 FILE_PARTITION_SIZE = 1_048_576  # MB
 
 
@@ -284,16 +286,8 @@ class Client:
         self.messages_received.put(message)
 
     # TODO Move reading from the file to send_files_threading function
-    def add_file_to_send(self, file_path: str) -> None:
-        file_name = file_path.split("/")[-1]
-        self.console_menu_stop.set()
-        print("Reading the file...")
-        with open(file_path, "rb") as file:
-            file_bytes = file.read()
-        print("File read!")
-        file = (file_name, file_bytes)
-        self.files_to_send.put(file)
-        self.console_menu_stop = Event()
+    def add_file_to_send(self, filename: str) -> None:
+        self.files_to_send.put(filename)
 
     def get_file_received(self) -> bytes:
         pass
@@ -302,20 +296,28 @@ class Client:
     #  Read FILE_PARTITION_SIZE bytes from the file, encrypt, send
     def send_files_threading(self) -> None:
         while True:
-            file_name, file_bytes = self.files_to_send.get()
-
+            filename = self.files_to_send.get()
             self.console_menu_stop.set()
+
             ciphertext = self.sym_encrypt(b"<FILE>", self.session_key, self.initial_vector)
             self.client_socket.sendall(ciphertext)
 
+            file_name = filename.split("/")[-1]
             file_name_bytes = file_name.encode()
             ciphertext = self.sym_encrypt(file_name_bytes, self.session_key, self.initial_vector)
             self.client_socket.sendall(ciphertext)
+
+            print("Reading the file...")
+            with open(filename, "rb") as file:
+                file_bytes = file.read()
+            print("File read!")
 
             print("Encrypting the file...")
             ciphered_file_bytes = self.sym_encrypt(file_bytes, self.session_key, self.initial_vector)
             print("File encrypted!")
             ciphered_file_size = len(ciphered_file_bytes)
+
+            del file_bytes
 
             file_size_bytes = ciphered_file_size.to_bytes(64, "little")
             ciphertext = self.sym_encrypt(file_size_bytes, self.session_key, self.initial_vector)
@@ -325,11 +327,17 @@ class Client:
                             unit="B", unit_scale=True, unit_divisor=1024)
             send_size = FILE_PARTITION_SIZE
             partitioned_data = [ciphered_file_bytes[i:i + send_size] for i in range(0, ciphered_file_size, send_size)]
+
+            del ciphered_file_bytes
+
             for data in partitioned_data:
                 self.client_socket.sendall(data)
                 progress.update(len(data))
             progress.close()
+
             del progress
+            gc.collect()
+
             print("File sent!")
             self.console_menu_stop = Event()
 
