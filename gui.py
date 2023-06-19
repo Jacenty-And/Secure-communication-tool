@@ -1,6 +1,7 @@
 import tkinter
 import tkinter.scrolledtext
 from threading import Thread
+from tkinter.filedialog import askopenfilename
 
 from client import Client
 
@@ -27,9 +28,13 @@ class Gui:
         self.input_area = tkinter.Text(self.window, height=3)
         self.input_area.pack(padx=20, pady=5)
 
-        self.send_button = tkinter.Button(self.window, text="Send", command=self.get_message_to_send)
-        self.send_button.config(font=("Arial", 12))
-        self.send_button.pack(padx=20, pady=5)
+        self.send_message_button = tkinter.Button(self.window, text="Send", command=self.get_message_to_send)
+        self.send_message_button.config(font=("Arial", 12))
+        self.send_message_button.pack(padx=20, pady=5)
+
+        self.send_file_button = tkinter.Button(self.window, text="Send file", command=self.get_file_to_send)
+        self.send_file_button.config(font=("Arial", 12))
+        self.send_file_button.pack(padx=20, pady=5)
 
         self.window.protocol("WM_DELETE_WINDOW", self.stop)
 
@@ -56,6 +61,15 @@ class Gui:
             self.text_area.insert("end", f"User: {message}")
             self.text_area.yview("end")
             self.text_area.config(state="disabled")
+
+    def get_file_to_send(self) -> None:
+        filename = askopenfilename(filetypes=(("All files", " *.* "),))
+        self.text_area.config(state="normal")
+        self.text_area.insert("end", f"Sending: {filename}\n")
+        self.text_area.yview("end")
+        self.text_area.config(state="disabled")
+        # TODO files_to_send have to store filenames
+        self.client.add_file_to_send(filename)
 
     def stop(self):
         self.running = False
