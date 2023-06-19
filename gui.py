@@ -2,6 +2,8 @@ import tkinter
 import tkinter.scrolledtext
 from threading import Thread
 from tkinter.filedialog import askopenfilename
+from tkinter.ttk import Progressbar
+from tkinter.messagebox import showinfo
 
 from client import Client
 
@@ -11,6 +13,7 @@ class Gui:
         self.client = client
 
         self.window = tkinter.Tk()
+        self.window.title("Secure Communication Tool")
         self.window.configure(background="lightgray")
 
         self.chat_label = tkinter.Label(self.window, text="Chat: ", background="lightgray")
@@ -40,6 +43,7 @@ class Gui:
 
         self.running = True
         Thread(target=self.print_received_messages_threading, daemon=True).start()
+        Thread(target=self.track_file_receiving_progress_threading, daemon=True).start()
 
         self.window.mainloop()
 
@@ -68,8 +72,29 @@ class Gui:
         self.text_area.insert("end", f"Sending: {filename}\n")
         self.text_area.yview("end")
         self.text_area.config(state="disabled")
-        # TODO files_to_send have to store filenames
         self.client.add_file_to_send(filename)
+
+    def track_file_receiving_progress_threading(self) -> None:
+        while True:
+            tracked_file_name, progress = self.client.get_file_receiving_progress()
+            file_name_label = tkinter.Label(self.window, text=f"Receiving: {tracked_file_name}", background="lightgray")
+            file_name_label.pack()
+            progress_bar = Progressbar(self.window, orient="horizontal", mode="determinate", length=280)
+            progress_bar.pack()
+            progress_label = tkinter.Label(self.window, text=f"{progress_bar['value']}%", background="lightgray")
+            progress_label.pack()
+            while True:
+                if progress_bar["value"] <= progress:
+                    progress_bar["value"] = progress
+                    progress_label["text"] = f"{progress}%"
+                    _, progress = self.client.get_file_receiving_progress(tracked_file_name)
+                if progress >= 100:
+                    file_name_label.destroy()
+                    progress_bar.destroy()
+                    progress_label.destroy()
+                    showinfo(title=f"Receiving: {tracked_file_name}",
+                             message=f"{tracked_file_name} received!")
+                    break
 
     def stop(self):
         self.running = False

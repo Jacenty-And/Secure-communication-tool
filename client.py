@@ -28,7 +28,7 @@ class Client:
         self.messages_to_send = Queue()
         self.messages_received = Queue()
         self.files_to_send = Queue()
-        self.files_received = Queue()
+        self.files_bytes_received = Queue()
 
         self.client_socket, self.is_hosting = self.try_host_else_connect()
 
@@ -289,8 +289,15 @@ class Client:
     def add_file_to_send(self, filename: str) -> None:
         self.files_to_send.put(filename)
 
-    def get_file_received(self) -> bytes:
-        pass
+    def get_file_receiving_progress(self, tracked_file_name: str = None) -> Tuple[str, int]:
+        while True:
+            file_name, total_size, received_size = self.files_bytes_received.get()
+            if file_name != tracked_file_name and tracked_file_name is not None:
+                file = (file_name, total_size, received_size)
+                self.files_bytes_received.put(file)
+                continue
+            progress_percent = int(received_size / total_size * 100)
+            return file_name, progress_percent
 
     # TODO Optimize memory usage
     #  Read FILE_PARTITION_SIZE bytes from the file, encrypt, send
@@ -352,11 +359,20 @@ class Client:
 
         progress = tqdm(range(file_size), f"Receiving {file_name}",
                         unit="B", unit_scale=True, unit_divisor=1024)
+
         file_bytes = b""
+
+        file = (file_name, file_size, len(file_bytes))
+        self.files_bytes_received.put(file)
+
         while True:
             data = self.client_socket.recv(FILE_PARTITION_SIZE)
             file_bytes += data
             progress.update(len(data))
+
+            file = (file_name, file_size, len(file_bytes))
+            self.files_bytes_received.put(file)
+
             if len(file_bytes) == file_size:
                 break
         progress.close()
