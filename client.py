@@ -150,48 +150,36 @@ class Client:
 
     def send_session_key(self, session_key: bytes, public_key: RsaKey, algorithm_type: str, key_size: int,
                          block_size: int, cipher_mode: str, initial_vector: bytes = None) -> None:
-        encrypted = asym_encrypt(b"<CIPHER_PARAMS>", public_key)
-        self.client_socket.send(encrypted)
 
-        encrypted = asym_encrypt(b"<ALGORITHM_TYPE>", public_key)
-        self.client_socket.send(encrypted)
-        self.algorithm_type = algorithm_type
-        encrypted = asym_encrypt(algorithm_type.encode(), public_key)
-        self.client_socket.send(encrypted)
+        def encrypt_and_send(message_bytes: bytes):
+            encrypted = asym_encrypt(message_bytes, public_key)
+            self.client_socket.sendall(encrypted)
 
-        encrypted = asym_encrypt(b"<KEY_SIZE>", public_key)
-        self.client_socket.send(encrypted)
-        self.key_size = key_size
+        encrypt_and_send(b"<CIPHER_PARAMS>")
+
+        encrypt_and_send(b"<ALGORITHM_TYPE>")
+        algorithm_type_bytes = algorithm_type.encode()
+        encrypt_and_send(algorithm_type_bytes)
+
+        encrypt_and_send(b"<KEY_SIZE>")
         key_size_bytes = key_size.to_bytes(64, "little")
-        encrypted = asym_encrypt(key_size_bytes, public_key)
-        self.client_socket.send(encrypted)
+        encrypt_and_send(key_size_bytes)
 
-        encrypted = asym_encrypt(b"<BLOCK_SIZE>", public_key)
-        self.client_socket.send(encrypted)
-        self.block_size = block_size
+        encrypt_and_send(b"<BLOCK_SIZE>")
         block_size_bytes = block_size.to_bytes(64, "little")
-        encrypted = asym_encrypt(block_size_bytes, public_key)
-        self.client_socket.send(encrypted)
+        encrypt_and_send(block_size_bytes)
 
-        encrypted = asym_encrypt(b"<CIPHER_MODE>", public_key)
-        self.client_socket.send(encrypted)
-        self.cipher_mode = cipher_mode
-        encrypted = asym_encrypt(cipher_mode.encode(), public_key)
-        self.client_socket.send(encrypted)
+        encrypt_and_send(b"<CIPHER_MODE>")
+        cipher_mode_bytes = cipher_mode.encode()
+        encrypt_and_send(cipher_mode_bytes)
 
-        encrypted = asym_encrypt(b"<INITIAL_VECTOR>", public_key)
-        self.client_socket.send(encrypted)
-        self.initial_vector = initial_vector
-        encrypted = asym_encrypt(initial_vector, public_key)
-        self.client_socket.send(encrypted)
+        encrypt_and_send(b"<INITIAL_VECTOR>")
+        encrypt_and_send(initial_vector)
 
-        encrypted = asym_encrypt(b"<SESSION_KEY>", public_key)
-        self.client_socket.send(encrypted)
-        encrypted = asym_encrypt(session_key, public_key)
-        self.client_socket.sendall(encrypted)
+        encrypt_and_send(b"<SESSION_KEY>")
+        encrypt_and_send(session_key)
 
-        encrypted = asym_encrypt(b"<END>", public_key)
-        self.client_socket.send(encrypted)
+        encrypt_and_send(b"<END>")
 
     def receive_session_key_and_params(self, private_key: RsaKey) -> Tuple[str, int, int, str, bytes, bytes]:
 
@@ -257,8 +245,6 @@ class Client:
                     exit()
             except WindowsError:
                 # If the existing connection is closed, client become a host
-                # TODO Fix reconnecting
-                #  Console inputs for menu and for loading and saving rsa keys overlaps
                 print("Connection lost!")
                 self.reconnect()
 
