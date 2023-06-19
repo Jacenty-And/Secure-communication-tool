@@ -12,11 +12,11 @@ Before the transmission process, the session key must be generated and securely 
 ---
 
 ### Requirements:
-- [ ] The GUI interface must allow to type and send a text message to the other user. Besides, the text also an ability of sending any typical files (e.g. .txt, .png, .pdf,.avi), with any size (e.g. 1kB - small file, and also 500 MB – large file) must be implemented.
+- [x] The GUI interface must allow to type and send a text message to the other user. Besides, the text also an ability of sending any typical files (e.g. .txt, .png, .pdf,.avi), with any size (e.g. 1kB - small file, and also 500 MB – large file) must be implemented.
 - [x] The AES block cipher should be used to cipher the data. 
 - [ ] It is obligatory to use two modes of operation of the block ciphers (ECB, CBC), it will be selected by the user in the GUI.
 - [ ] It is obligatory to implement status icons and a progress bar to present the current connection status and presenting the progress of sending the large files.
-- [ ] For large files a method of data division must be implemented before sending them via the Ethernet interface.
+- [x] For large files a method of data division must be implemented before sending them via the Ethernet interface.
 - [x] A UDP (User Datagram Protocol) or TCP (Transmission Control Protocol) communication protocol must be used to send the data between the applications.
 - [x] A pseudorandom generator must be used to generate the session key.
 - [x] The session key must be encrypted by using the RSA public key of the receiving person and then send to the receiving person.
