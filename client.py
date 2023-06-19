@@ -297,6 +297,7 @@ class Client:
         message = decrypted.decode()
         self.messages_received.put(message)
 
+    # TODO Move reading from the file to send_files_threading function
     def add_file_to_send(self, file_path: str) -> None:
         file_name = file_path.split("/")[-1]
         self.console_menu_stop.set()
@@ -311,6 +312,8 @@ class Client:
     def get_file_received(self) -> bytes:
         pass
 
+    # TODO Optimize memory usage
+    #  Read FILE_PARTITION_SIZE bytes from the file, encrypt, send
     def send_files_threading(self) -> None:
         while True:
             file_name, file_bytes = self.files_to_send.get()
