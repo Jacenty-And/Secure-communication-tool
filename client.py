@@ -25,6 +25,7 @@ class Client:
         self.host_num = host
         self.port_num = port
 
+        self.logs = Queue()
         self.messages_to_send = Queue()
         self.messages_received = Queue()
         self.files_to_send = Queue()
@@ -54,17 +55,21 @@ class Client:
     def host(self) -> socket.socket:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
             server_socket.bind((self.host_num, self.port_num))
-            print("I'm hosting!")
+            # print("I'm hosting!")
+            self.logs.put("I'm hosting!")
             server_socket.listen()
-            print("Waiting for someone to connect...")
+            # print("Waiting for someone to connect...")
+            self.logs.put("Waiting for someone to connect...")
             client_socket, address = server_socket.accept()
-            print(f"{address} connected!")
+            # print(f"{address} connected!")
+            self.logs.put(f"{address} connected!")
         return client_socket
 
     def connect(self) -> socket.socket:
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((self.host_num, self.port_num))
-        print("I connected to the host!")
+        # print("I connected to the host!")
+        self.logs.put("I connected to the host!")
         return client_socket
 
     def generate_or_receive_session_key_and_params(self) -> Tuple[str, int, int, str, bytes, bytes]:
@@ -72,6 +77,7 @@ class Client:
             # If the client is hosting the connection
             # public and private keys are generated
             # session key is received from another client
+            # TODO: Inputs outside the Client class
             if input("Do you want to load public and private keys? Y/N ").upper() == "Y":
                 try:
                     public_key, private_key = self.load_rsa_keys()
@@ -82,20 +88,23 @@ class Client:
                     print(str(e.args[1]) + ". Exiting the program")
                     exit()
             else:
-                print("Generating public and private keys")
+                # print("Generating public and private keys")
+                self.logs.put("Generating public and private keys")
                 public_key, private_key = generate_keys()
                 if input("Do you want to save public and private keys? Y/N ").upper() == "Y":
                     self.save_rsa_keys(public_key, private_key)
             self.send_public_key(public_key)
             algorithm_type, key_size, block_size, cipher_mode, initial_vector, session_key = \
                 self.receive_session_key_and_params(private_key)
-            print("Session key received!")
+            # print("Session key received!")
+            self.logs.put("Session key received!")
         else:
             # If the client is connected to the host
             # public key is received from another client
             # session key is generated
             public_key = self.receive_public_key()
-            print("Generating session key")
+            # print("Generating session key")
+            self.logs.put("Generating session key")
             key_size = 32
             session_key = get_random_bytes(key_size)
             while True:
@@ -108,11 +117,13 @@ class Client:
             initial_vector = get_random_bytes(aes_block_size)
             self.send_session_key(session_key, public_key, algorithm_type, key_size,
                                   block_size, cipher_mode, initial_vector)
-            print("Session key sent!")
+            # print("Session key sent!")
+            self.logs.put("Session key sent!")
         return algorithm_type, key_size, block_size, cipher_mode, initial_vector, session_key
 
     @staticmethod
     def load_rsa_keys() -> Tuple[RsaKey, RsaKey]:
+        # TODO: Inputs outside the Client class
         public_key_path = input("Enter the path where the public key is saved: ")
         public_key = load_public_key(public_key_path)
         private_key_path = input("Enter the path where the private key is saved: ")
@@ -123,6 +134,7 @@ class Client:
 
     @staticmethod
     def save_rsa_keys(public_key: RsaKey, private_key: RsaKey) -> None:
+        # TODO: Inputs outside the Client class
         public_key_path = input("Enter the path where to save the public key: ")
         save_public_key(public_key, public_key_path)
         private_key_path = input("Enter the path where to save the private key: ")
@@ -134,19 +146,22 @@ class Client:
         key_bytes = public_key.export_key("PEM")
         self.client_socket.sendall(key_bytes)
         self.client_socket.send(b"<END>")
-        print("Public key sent!")
+        # print("Public key sent!")
+        self.logs.put("Public key sent!")
 
     def receive_public_key(self) -> RsaKey:
         received = self.client_socket.recv(1024)
         if not received.decode().startswith("<PUBLIC_KEY>"):
-            print("Public key not received. Exiting the program")
+            # print("Public key not received. Exiting the program")
+            self.logs.put("Public key not received. Exiting the program")
             exit()
         key_bytes = b""
         while not key_bytes.decode().endswith("<END>"):
             data = self.client_socket.recv(1024)
             key_bytes += data
         key_bytes = key_bytes.replace(b"<END>", b"")
-        print("Public key received!")
+        # print("Public key received!")
+        self.logs.put("Public key received!")
         public_key = import_key(key_bytes)
         return public_key
 
@@ -190,7 +205,8 @@ class Client:
             dec = asym_decrypt(recv, private_key)
             if not dec.decode().startswith(message_header):
                 message_text = message_header.strip("<>").replace("_", " ").capitalize()
-                print(f"{message_text} not received. Exiting the program")
+                # print(f"{message_text} not received. Exiting the program")
+                self.logs.put(f"{message_text} not received. Exiting the program")
                 exit()
             recv = self.client_socket.recv(128)
             dec = asym_decrypt(recv, private_key)
@@ -199,7 +215,8 @@ class Client:
         received = self.client_socket.recv(128)
         decrypted = asym_decrypt(received, private_key)
         if not decrypted.decode().startswith("<CIPHER_PARAMS>"):
-            print("Cipher params not received. Exiting the program")
+            # print("Cipher params not received. Exiting the program")
+            self.logs.put("Cipher params not received. Exiting the program")
             exit()
 
         received = receive_and_decrypt("<ALGORITHM_TYPE>")
@@ -220,7 +237,8 @@ class Client:
         received = self.client_socket.recv(128)
         decrypted = asym_decrypt(received, private_key)
         if not decrypted.decode().startswith("<SESSION_KEY>"):
-            print("Session key not received. Exiting the program")
+            # print("Session key not received. Exiting the program")
+            self.logs.put("Session key not received. Exiting the program")
             exit()
         key_bytes = b""
         while True:
@@ -243,11 +261,13 @@ class Client:
                 elif decrypted == b"<FILE>":
                     self.receive_file()
                 else:
-                    print("Incorrect data received. Exiting the program")
+                    # print("Incorrect data received. Exiting the program")
+                    self.logs.put("Incorrect data received. Exiting the program")
                     exit()
             except WindowsError:
                 # If the existing connection is closed, client become a host
-                print("Connection lost!")
+                # print("Connection lost!")
+                self.logs.put("Connection lost!")
                 self.reconnect()
 
     def reconnect(self) -> None:
@@ -314,14 +334,18 @@ class Client:
             ciphertext = self.sym_encrypt(file_name_bytes, self.session_key, self.initial_vector)
             self.client_socket.sendall(ciphertext)
 
-            print("Reading the file...")
+            # print("Reading the file...")
+            self.logs.put("Reading the file...")
             with open(filename, "rb") as file:
                 file_bytes = file.read()
-            print("File read!")
+            # print("File read!")
+            self.logs.put("File read!")
 
-            print("Encrypting the file...")
+            # print("Encrypting the file...")
+            self.logs.put("Encrypting the file...")
             ciphered_file_bytes = self.sym_encrypt(file_bytes, self.session_key, self.initial_vector)
-            print("File encrypted!")
+            # print("File encrypted!")
+            self.logs.put("File encrypted!")
             ciphered_file_size = len(ciphered_file_bytes)
 
             del file_bytes
@@ -345,7 +369,8 @@ class Client:
             del progress
             gc.collect()
 
-            print("File sent!")
+            # print("File sent!")
+            self.logs.put("File sent!")
             self.console_menu_stop = Event()
 
     def receive_file(self) -> None:
@@ -378,16 +403,21 @@ class Client:
         progress.close()
         del progress
 
-        print("Decrypting the file...")
+        # print("Decrypting the file...")
+        self.logs.put("Decrypting the file...")
         decrypted_file = self.sym_decrypt(file_bytes, self.session_key, self.initial_vector)
-        print("File decrypted!")
+        # print("File decrypted!")
+        self.logs.put("File decrypted!")
 
-        print("Saving the file...")
+        # print("Saving the file...")
+        self.logs.put("Saving the file...")
         with open(f"received/{file_name}", "wb") as file:
             file.write(decrypted_file)
-        print("File saved!")
+        # print("File saved!")
+        self.logs.put("File saved!")
 
     # TODO Cancel menu input after reconnecting
+    # TODO: Make outside class for console menu
     def console_menu_loop(self) -> None:
         while True:
             if self.console_menu_stop.is_set():

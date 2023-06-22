@@ -44,6 +44,7 @@ class Gui:
         self.running = True
         Thread(target=self.print_received_messages_threading, daemon=True).start()
         Thread(target=self.track_file_receiving_progress_threading, daemon=True).start()
+        Thread(target=self.receive_logs_threading, daemon=True).start()
 
         self.window.mainloop()
 
@@ -95,6 +96,16 @@ class Gui:
                     showinfo(title=f"Receiving: {tracked_file_name}",
                              message=f"{tracked_file_name} received!")
                     break
+
+    def receive_logs_threading(self) -> None:
+        while True:
+            # message = self.client.messages_received.get()
+            log = self.client.logs.get()
+            self.text_area.config(state="normal")
+            log += '\n'
+            self.text_area.insert("end", log)
+            self.text_area.yview("end")
+            self.text_area.config(state="disabled")
 
     def stop(self):
         self.running = False
