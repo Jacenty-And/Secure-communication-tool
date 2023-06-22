@@ -1,9 +1,7 @@
 # Secure-communication-tool
 
----
-
 Semester 6 - Security of Computer Systems 
-
+---
 Encrypted Data Transmission With a Session Key Transfer in Unsecure Environment
 
 Software tool for sending files and messages in unsecure environment. 
