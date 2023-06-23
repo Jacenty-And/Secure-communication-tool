@@ -33,6 +33,7 @@ class Client:
 
         self.client_socket, self.is_hosting = self.try_host_else_connect()
 
+        # TODO: Make outside function to specify generate_or_receive_session_key_and_params parameters
         self.algorithm_type, self.key_size, self.block_size, self.cipher_mode, self.initial_vector, self.session_key = \
             self.generate_or_receive_session_key_and_params()
         self.sym_encrypt = encrypt_ECB if self.cipher_mode == "ECB" else encrypt_CBC
@@ -72,27 +73,37 @@ class Client:
         self.logs.put("I connected to the host!")
         return client_socket
 
-    def generate_or_receive_session_key_and_params(self) -> Tuple[str, int, int, str, bytes, bytes]:
+    def generate_or_receive_session_key_and_params(self,
+                                                   load: bool = False,
+                                                   save: bool = False,
+                                                   public_key_path: str = None,
+                                                   private_key_path: str = None,
+                                                   password: str = None,
+                                                   algorithm_type: str = "AES",
+                                                   key_size: int = 32,
+                                                   block_size: int = aes_block_size,
+                                                   cipher_mode: str = "ECB") -> Tuple[str, int, int, str, bytes, bytes]:
         if self.is_hosting:
             # If the client is hosting the connection
             # public and private keys are generated
             # session key is received from another client
-            # TODO: Inputs outside the Client class
-            if input("Do you want to load public and private keys? Y/N ").upper() == "Y":
+            if load:
                 try:
-                    public_key, private_key = self.load_rsa_keys()
+                    public_key, private_key = self.load_rsa_keys(public_key_path, private_key_path, password)
                 except ValueError:
-                    print("The password is not correct. Exiting the program")
+                    # print("The password is not correct. Exiting the program")
+                    self.logs.put("The password is not correct. Exiting the program")
                     exit()
                 except Exception as e:
-                    print(str(e.args[1]) + ". Exiting the program")
+                    # print(str(e.args[1]) + ". Exiting the program")
+                    self.logs.put(str(e.args[1]) + ". Exiting the program")
                     exit()
             else:
                 # print("Generating public and private keys")
-                self.logs.put("Generating public and private keys")
+                self.logs.put("Generating public and private keys...")
                 public_key, private_key = generate_keys()
-                if input("Do you want to save public and private keys? Y/N ").upper() == "Y":
-                    self.save_rsa_keys(public_key, private_key)
+                if save:
+                    self.save_rsa_keys(public_key, private_key, public_key_path, private_key_path, password)
             self.send_public_key(public_key)
             algorithm_type, key_size, block_size, cipher_mode, initial_vector, session_key = \
                 self.receive_session_key_and_params(private_key)
@@ -104,17 +115,9 @@ class Client:
             # session key is generated
             public_key = self.receive_public_key()
             # print("Generating session key")
-            self.logs.put("Generating session key")
-            key_size = 32
+            self.logs.put("Generating session key...")
             session_key = get_random_bytes(key_size)
-            while True:
-                cipher_mode = input("Enter the cipher mode [ECB, CBC]: ")
-                if cipher_mode in ["ECB", "CBC"]:
-                    break
-                print("Wrong cipher mode! Select cipher mode from printed modes")
-            algorithm_type = "AES"
-            block_size = aes_block_size
-            initial_vector = get_random_bytes(aes_block_size)
+            initial_vector = get_random_bytes(block_size)
             self.send_session_key(session_key, public_key, algorithm_type, key_size,
                                   block_size, cipher_mode, initial_vector)
             # print("Session key sent!")
@@ -122,23 +125,15 @@ class Client:
         return algorithm_type, key_size, block_size, cipher_mode, initial_vector, session_key
 
     @staticmethod
-    def load_rsa_keys() -> Tuple[RsaKey, RsaKey]:
-        # TODO: Inputs outside the Client class
-        public_key_path = input("Enter the path where the public key is saved: ")
+    def load_rsa_keys(public_key_path: str, private_key_path: str, password: str) -> Tuple[RsaKey, RsaKey]:
         public_key = load_public_key(public_key_path)
-        private_key_path = input("Enter the path where the private key is saved: ")
-        # TODO secure password input
-        password = input("Enter the password to decrypt the private key: ")
         private_key = load_private_key(private_key_path, password)
         return public_key, private_key
 
     @staticmethod
-    def save_rsa_keys(public_key: RsaKey, private_key: RsaKey) -> None:
-        # TODO: Inputs outside the Client class
-        public_key_path = input("Enter the path where to save the public key: ")
+    def save_rsa_keys(public_key: RsaKey, private_key: RsaKey,
+                      public_key_path: str, private_key_path: str, password: str) -> None:
         save_public_key(public_key, public_key_path)
-        private_key_path = input("Enter the path where to save the private key: ")
-        password = input("Enter the password to encrypt the private key: ")
         save_private_key(private_key, private_key_path, password)
 
     def send_public_key(self, public_key: RsaKey) -> None:
@@ -273,6 +268,7 @@ class Client:
     def reconnect(self) -> None:
         self.console_menu_stop.set()
         self.client_socket, self.is_hosting = self.try_host_else_connect()
+        # TODO: Make outside function to specify generate_or_receive_session_key_and_params parameters
         self.algorithm_type, self.key_size, self.block_size, self.cipher_mode, self.initial_vector, self.session_key \
             = self.generate_or_receive_session_key_and_params()
         self.sym_encrypt = encrypt_ECB if self.cipher_mode == "ECB" else encrypt_CBC
@@ -411,6 +407,7 @@ class Client:
 
         # print("Saving the file...")
         self.logs.put("Saving the file...")
+        # TODO: Directory for received from function parameter
         with open(f"received/{file_name}", "wb") as file:
             file.write(decrypted_file)
         # print("File saved!")
