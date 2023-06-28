@@ -1,5 +1,6 @@
 from client import Client
 from gui import Gui
+from console_menu import ConsoleMenu
 
 HOST = "127.0.0.1"
 PORT = 65432
@@ -15,6 +16,6 @@ if __name__ == '__main__':
         if menu == "1":
             gui = Gui(client)
         elif menu == "2":
-            client.console_menu_loop()
+            console_menu = ConsoleMenu(client)
         else:
             break

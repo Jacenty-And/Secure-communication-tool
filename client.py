@@ -10,7 +10,7 @@ from aes_encryption import encrypt_ECB, decrypt_ECB, encrypt_CBC, decrypt_CBC
 from Crypto.Cipher.AES import block_size as aes_block_size
 from Crypto.Random import get_random_bytes
 
-from threading import Thread, Event
+from threading import Thread
 from queue import Queue
 
 from tqdm import tqdm
@@ -39,7 +39,6 @@ class Client:
         self.sym_encrypt = encrypt_ECB if self.cipher_mode == "ECB" else encrypt_CBC
         self.sym_decrypt = decrypt_ECB if self.cipher_mode == "ECB" else decrypt_CBC
 
-        self.console_menu_stop = Event()
         self.running = False
 
     def try_host_else_connect(self) -> Tuple[socket.socket, bool]:
@@ -56,20 +55,16 @@ class Client:
     def host(self) -> socket.socket:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
             server_socket.bind((self.host_num, self.port_num))
-            # print("I'm hosting!")
             self.logs.put("I'm hosting!")
             server_socket.listen()
-            # print("Waiting for someone to connect...")
             self.logs.put("Waiting for someone to connect...")
             client_socket, address = server_socket.accept()
-            # print(f"{address} connected!")
             self.logs.put(f"{address} connected!")
         return client_socket
 
     def connect(self) -> socket.socket:
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((self.host_num, self.port_num))
-        # print("I connected to the host!")
         self.logs.put("I connected to the host!")
         return client_socket
 
@@ -91,15 +86,12 @@ class Client:
                 try:
                     public_key, private_key = self.load_rsa_keys(public_key_path, private_key_path, password)
                 except ValueError:
-                    # print("The password is not correct. Exiting the program")
                     self.logs.put("The password is not correct. Exiting the program")
                     exit()
                 except Exception as e:
-                    # print(str(e.args[1]) + ". Exiting the program")
                     self.logs.put(str(e.args[1]) + ". Exiting the program")
                     exit()
             else:
-                # print("Generating public and private keys")
                 self.logs.put("Generating public and private keys...")
                 public_key, private_key = generate_keys()
                 if save:
@@ -107,20 +99,17 @@ class Client:
             self.send_public_key(public_key)
             algorithm_type, key_size, block_size, cipher_mode, initial_vector, session_key = \
                 self.receive_session_key_and_params(private_key)
-            # print("Session key received!")
             self.logs.put("Session key received!")
         else:
             # If the client is connected to the host
             # public key is received from another client
             # session key is generated
             public_key = self.receive_public_key()
-            # print("Generating session key")
             self.logs.put("Generating session key...")
             session_key = get_random_bytes(key_size)
             initial_vector = get_random_bytes(block_size)
             self.send_session_key(session_key, public_key, algorithm_type, key_size,
                                   block_size, cipher_mode, initial_vector)
-            # print("Session key sent!")
             self.logs.put("Session key sent!")
         return algorithm_type, key_size, block_size, cipher_mode, initial_vector, session_key
 
@@ -141,13 +130,11 @@ class Client:
         key_bytes = public_key.export_key("PEM")
         self.client_socket.sendall(key_bytes)
         self.client_socket.send(b"<END>")
-        # print("Public key sent!")
         self.logs.put("Public key sent!")
 
     def receive_public_key(self) -> RsaKey:
         received = self.client_socket.recv(1024)
         if not received.decode().startswith("<PUBLIC_KEY>"):
-            # print("Public key not received. Exiting the program")
             self.logs.put("Public key not received. Exiting the program")
             exit()
         key_bytes = b""
@@ -155,7 +142,6 @@ class Client:
             data = self.client_socket.recv(1024)
             key_bytes += data
         key_bytes = key_bytes.replace(b"<END>", b"")
-        # print("Public key received!")
         self.logs.put("Public key received!")
         public_key = import_key(key_bytes)
         return public_key
@@ -200,7 +186,6 @@ class Client:
             dec = asym_decrypt(recv, private_key)
             if not dec.decode().startswith(message_header):
                 message_text = message_header.strip("<>").replace("_", " ").capitalize()
-                # print(f"{message_text} not received. Exiting the program")
                 self.logs.put(f"{message_text} not received. Exiting the program")
                 exit()
             recv = self.client_socket.recv(128)
@@ -210,7 +195,6 @@ class Client:
         received = self.client_socket.recv(128)
         decrypted = asym_decrypt(received, private_key)
         if not decrypted.decode().startswith("<CIPHER_PARAMS>"):
-            # print("Cipher params not received. Exiting the program")
             self.logs.put("Cipher params not received. Exiting the program")
             exit()
 
@@ -232,7 +216,6 @@ class Client:
         received = self.client_socket.recv(128)
         decrypted = asym_decrypt(received, private_key)
         if not decrypted.decode().startswith("<SESSION_KEY>"):
-            # print("Session key not received. Exiting the program")
             self.logs.put("Session key not received. Exiting the program")
             exit()
         key_bytes = b""
@@ -256,24 +239,20 @@ class Client:
                 elif decrypted == b"<FILE>":
                     self.receive_file()
                 else:
-                    # print("Incorrect data received. Exiting the program")
                     self.logs.put("Incorrect data received. Exiting the program")
                     exit()
             except WindowsError:
                 # If the existing connection is closed, client become a host
-                # print("Connection lost!")
                 self.logs.put("Connection lost!")
                 self.reconnect()
 
     def reconnect(self) -> None:
-        self.console_menu_stop.set()
         self.client_socket, self.is_hosting = self.try_host_else_connect()
         # TODO: Make outside function to specify generate_or_receive_session_key_and_params parameters
         self.algorithm_type, self.key_size, self.block_size, self.cipher_mode, self.initial_vector, self.session_key \
             = self.generate_or_receive_session_key_and_params()
         self.sym_encrypt = encrypt_ECB if self.cipher_mode == "ECB" else encrypt_CBC
         self.sym_decrypt = decrypt_ECB if self.cipher_mode == "ECB" else decrypt_CBC
-        self.console_menu_stop = Event()
 
     def add_message_to_send(self, message: str) -> None:
         self.messages_to_send.put(message)
@@ -289,6 +268,7 @@ class Client:
             message = self.messages_to_send.get()
 
             ciphertext = self.sym_encrypt(b"<MESSAGE>", self.session_key, self.initial_vector)
+            # TODO: ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
             self.client_socket.sendall(ciphertext)
 
             message_bytes = message.encode()
@@ -301,7 +281,6 @@ class Client:
         message = decrypted.decode()
         self.messages_received.put(message)
 
-    # TODO Move reading from the file to send_files_threading function
     def add_file_to_send(self, filename: str) -> None:
         self.files_to_send.put(filename)
 
@@ -320,7 +299,6 @@ class Client:
     def send_files_threading(self) -> None:
         while True:
             filename = self.files_to_send.get()
-            self.console_menu_stop.set()
 
             ciphertext = self.sym_encrypt(b"<FILE>", self.session_key, self.initial_vector)
             self.client_socket.sendall(ciphertext)
@@ -330,17 +308,14 @@ class Client:
             ciphertext = self.sym_encrypt(file_name_bytes, self.session_key, self.initial_vector)
             self.client_socket.sendall(ciphertext)
 
-            # print("Reading the file...")
             self.logs.put("Reading the file...")
+            # TODO: try-except
             with open(filename, "rb") as file:
                 file_bytes = file.read()
-            # print("File read!")
             self.logs.put("File read!")
 
-            # print("Encrypting the file...")
             self.logs.put("Encrypting the file...")
             ciphered_file_bytes = self.sym_encrypt(file_bytes, self.session_key, self.initial_vector)
-            # print("File encrypted!")
             self.logs.put("File encrypted!")
             ciphered_file_size = len(ciphered_file_bytes)
 
@@ -365,9 +340,7 @@ class Client:
             del progress
             gc.collect()
 
-            # print("File sent!")
             self.logs.put("File sent!")
-            self.console_menu_stop = Event()
 
     def receive_file(self) -> None:
         received = self.client_socket.recv(1024)
@@ -399,42 +372,15 @@ class Client:
         progress.close()
         del progress
 
-        # print("Decrypting the file...")
         self.logs.put("Decrypting the file...")
         decrypted_file = self.sym_decrypt(file_bytes, self.session_key, self.initial_vector)
-        # print("File decrypted!")
         self.logs.put("File decrypted!")
 
-        # print("Saving the file...")
         self.logs.put("Saving the file...")
         # TODO: Directory for received from function parameter
         with open(f"received/{file_name}", "wb") as file:
             file.write(decrypted_file)
-        # print("File saved!")
         self.logs.put("File saved!")
-
-    # TODO Cancel menu input after reconnecting
-    # TODO: Make outside class for console menu
-    def console_menu_loop(self) -> None:
-        while True:
-            if self.console_menu_stop.is_set():
-                continue
-            print("1. Send")
-            print("2. Receive")
-            print("3. Send file")
-            print("4. Quit")
-            menu = input(": ")
-            if menu == "1":
-                message = input("Message: ")
-                self.add_message_to_send(message)
-            elif menu == "2":
-                for message in self.get_messages_received():
-                    print(message)
-            elif menu == "3":
-                file_path = input("File path: ")
-                self.add_file_to_send(file_path)
-            elif menu == "4":
-                exit()
 
     def run(self) -> None:
         if not self.running:
