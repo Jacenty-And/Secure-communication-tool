@@ -15,9 +15,12 @@ from queue import Queue
 
 from tqdm import tqdm
 
-import gc
+from os.path import getsize
 
-FILE_PARTITION_SIZE = 1_048_576  # MB
+# FILE_PARTITION_SIZE = 1_048_576  # MB
+# FILE_PARTITION_SIZE = 80
+# TODO: make bigger FILE_PARTITION_SIZE
+FILE_PARTITION_SIZE = 64
 
 
 class Client:
@@ -56,20 +59,16 @@ class Client:
     def host(self) -> socket.socket:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
             server_socket.bind((self.host_num, self.port_num))
-            # print("I'm hosting!")
             self.logs.put("I'm hosting!")
             server_socket.listen()
-            # print("Waiting for someone to connect...")
             self.logs.put("Waiting for someone to connect...")
             client_socket, address = server_socket.accept()
-            # print(f"{address} connected!")
             self.logs.put(f"{address} connected!")
         return client_socket
 
     def connect(self) -> socket.socket:
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((self.host_num, self.port_num))
-        # print("I connected to the host!")
         self.logs.put("I connected to the host!")
         return client_socket
 
@@ -91,15 +90,12 @@ class Client:
                 try:
                     public_key, private_key = self.load_rsa_keys(public_key_path, private_key_path, password)
                 except ValueError:
-                    # print("The password is not correct. Exiting the program")
                     self.logs.put("The password is not correct. Exiting the program")
                     exit()
                 except Exception as e:
-                    # print(str(e.args[1]) + ". Exiting the program")
                     self.logs.put(str(e.args[1]) + ". Exiting the program")
                     exit()
             else:
-                # print("Generating public and private keys")
                 self.logs.put("Generating public and private keys...")
                 public_key, private_key = generate_keys()
                 if save:
@@ -107,20 +103,17 @@ class Client:
             self.send_public_key(public_key)
             algorithm_type, key_size, block_size, cipher_mode, initial_vector, session_key = \
                 self.receive_session_key_and_params(private_key)
-            # print("Session key received!")
             self.logs.put("Session key received!")
         else:
             # If the client is connected to the host
             # public key is received from another client
             # session key is generated
             public_key = self.receive_public_key()
-            # print("Generating session key")
             self.logs.put("Generating session key...")
             session_key = get_random_bytes(key_size)
             initial_vector = get_random_bytes(block_size)
             self.send_session_key(session_key, public_key, algorithm_type, key_size,
                                   block_size, cipher_mode, initial_vector)
-            # print("Session key sent!")
             self.logs.put("Session key sent!")
         return algorithm_type, key_size, block_size, cipher_mode, initial_vector, session_key
 
@@ -141,13 +134,11 @@ class Client:
         key_bytes = public_key.export_key("PEM")
         self.client_socket.sendall(key_bytes)
         self.client_socket.send(b"<END>")
-        # print("Public key sent!")
         self.logs.put("Public key sent!")
 
     def receive_public_key(self) -> RsaKey:
         received = self.client_socket.recv(1024)
         if not received.decode().startswith("<PUBLIC_KEY>"):
-            # print("Public key not received. Exiting the program")
             self.logs.put("Public key not received. Exiting the program")
             exit()
         key_bytes = b""
@@ -155,7 +146,6 @@ class Client:
             data = self.client_socket.recv(1024)
             key_bytes += data
         key_bytes = key_bytes.replace(b"<END>", b"")
-        # print("Public key received!")
         self.logs.put("Public key received!")
         public_key = import_key(key_bytes)
         return public_key
@@ -200,7 +190,6 @@ class Client:
             dec = asym_decrypt(recv, private_key)
             if not dec.decode().startswith(message_header):
                 message_text = message_header.strip("<>").replace("_", " ").capitalize()
-                # print(f"{message_text} not received. Exiting the program")
                 self.logs.put(f"{message_text} not received. Exiting the program")
                 exit()
             recv = self.client_socket.recv(128)
@@ -210,7 +199,6 @@ class Client:
         received = self.client_socket.recv(128)
         decrypted = asym_decrypt(received, private_key)
         if not decrypted.decode().startswith("<CIPHER_PARAMS>"):
-            # print("Cipher params not received. Exiting the program")
             self.logs.put("Cipher params not received. Exiting the program")
             exit()
 
@@ -232,7 +220,6 @@ class Client:
         received = self.client_socket.recv(128)
         decrypted = asym_decrypt(received, private_key)
         if not decrypted.decode().startswith("<SESSION_KEY>"):
-            # print("Session key not received. Exiting the program")
             self.logs.put("Session key not received. Exiting the program")
             exit()
         key_bytes = b""
@@ -256,12 +243,10 @@ class Client:
                 elif decrypted == b"<FILE>":
                     self.receive_file()
                 else:
-                    # print("Incorrect data received. Exiting the program")
                     self.logs.put("Incorrect data received. Exiting the program")
                     exit()
             except WindowsError:
                 # If the existing connection is closed, client become a host
-                # print("Connection lost!")
                 self.logs.put("Connection lost!")
                 self.reconnect()
 
@@ -309,70 +294,53 @@ class Client:
         while True:
             file_name, total_size, received_size = self.files_bytes_received.get()
             if file_name != tracked_file_name and tracked_file_name is not None:
-                file = (file_name, total_size, received_size)
-                self.files_bytes_received.put(file)
+                file_tuple = (file_name, total_size, received_size)
+                self.files_bytes_received.put(file_tuple)
                 continue
             progress_percent = int(received_size / total_size * 100)
             return file_name, progress_percent
 
-    # TODO Optimize memory usage
-    #  Read FILE_PARTITION_SIZE bytes from the file, encrypt, send
     def send_files_threading(self) -> None:
         while True:
-            filename = self.files_to_send.get()
+            file_path = self.files_to_send.get()
             self.console_menu_stop.set()
 
             ciphertext = self.sym_encrypt(b"<FILE>", self.session_key, self.initial_vector)
             self.client_socket.sendall(ciphertext)
 
-            file_name = filename.split("/")[-1]
+            file_name = file_path.split("/")[-1]
             file_name_bytes = file_name.encode()
             ciphertext = self.sym_encrypt(file_name_bytes, self.session_key, self.initial_vector)
             self.client_socket.sendall(ciphertext)
 
-            # print("Reading the file...")
-            self.logs.put("Reading the file...")
-            with open(filename, "rb") as file:
-                file_bytes = file.read()
-            # print("File read!")
-            self.logs.put("File read!")
-
-            # print("Encrypting the file...")
-            self.logs.put("Encrypting the file...")
-            ciphered_file_bytes = self.sym_encrypt(file_bytes, self.session_key, self.initial_vector)
-            # print("File encrypted!")
-            self.logs.put("File encrypted!")
-            ciphered_file_size = len(ciphered_file_bytes)
-
-            del file_bytes
-
-            file_size_bytes = ciphered_file_size.to_bytes(64, "little")
+            file_size = getsize(file_path)
+            file_size_bytes = file_size.to_bytes(64, "little")
             ciphertext = self.sym_encrypt(file_size_bytes, self.session_key, self.initial_vector)
             self.client_socket.sendall(ciphertext)
 
-            progress = tqdm(range(ciphered_file_size), f"Sending {file_name}",
-                            unit="B", unit_scale=True, unit_divisor=1024)
-            send_size = FILE_PARTITION_SIZE
-            partitioned_data = [ciphered_file_bytes[i:i + send_size] for i in range(0, ciphered_file_size, send_size)]
+            self.send_file(file_path, file_size)
 
-            del ciphered_file_bytes
-
-            for data in partitioned_data:
-                self.client_socket.sendall(data)
-                progress.update(len(data))
-            progress.close()
-
-            del progress
-            gc.collect()
-
-            # print("File sent!")
             self.logs.put("File sent!")
             self.console_menu_stop = Event()
+
+    def send_file(self, file_path: str, file_size: int) -> None:
+        file_name = file_path.split("/")[-1]
+        progress = tqdm(range(file_size), f"Sending {file_name}",
+                        unit="B", unit_scale=True, unit_divisor=1024)
+        bytes_sent = 0
+        with open(file_path, "rb") as file:
+            while bytes_sent < file_size:
+                file_bytes = file.read(FILE_PARTITION_SIZE)
+                ciphered_file_bytes = self.sym_encrypt(file_bytes, self.session_key, self.initial_vector)
+                self.client_socket.sendall(ciphered_file_bytes)
+                bytes_sent += len(file_bytes)
+                progress.update(len(file_bytes))
+        progress.close()
 
     def receive_file(self) -> None:
         received = self.client_socket.recv(1024)
         decrypted = self.sym_decrypt(received, self.session_key, self.initial_vector)
-        file_name = decrypted.decode()
+        file_name = decrypted.decode(errors="ignore")
 
         received = self.client_socket.recv(1024)
         decrypted = self.sym_decrypt(received, self.session_key, self.initial_vector)
@@ -381,37 +349,27 @@ class Client:
         progress = tqdm(range(file_size), f"Receiving {file_name}",
                         unit="B", unit_scale=True, unit_divisor=1024)
 
-        file_bytes = b""
+        bytes_received = 0
 
-        file = (file_name, file_size, len(file_bytes))
-        self.files_bytes_received.put(file)
+        file_tuple = (file_name, file_size, bytes_received)
+        self.files_bytes_received.put(file_tuple)
 
-        while True:
-            data = self.client_socket.recv(FILE_PARTITION_SIZE)
-            file_bytes += data
-            progress.update(len(data))
+        # TODO: Directory for received from function parameter
+        open(f"received/{file_name}", "w").close()
+        with open(f"received/{file_name}", "ab") as file:
+            while bytes_received < file_size:
+                # TODO: dynamic number of bytes to receive
+                data = self.client_socket.recv(FILE_PARTITION_SIZE + 16)
+                decrypted = self.sym_decrypt(data, self.session_key, self.initial_vector)
+                file.write(decrypted)
+                bytes_received += len(decrypted)
+                progress.update(len(decrypted))
 
-            file = (file_name, file_size, len(file_bytes))
-            self.files_bytes_received.put(file)
+                file_tuple = (file_name, file_size, bytes_received)
+                self.files_bytes_received.put(file_tuple)
 
-            if len(file_bytes) == file_size:
-                break
         progress.close()
         del progress
-
-        # print("Decrypting the file...")
-        self.logs.put("Decrypting the file...")
-        decrypted_file = self.sym_decrypt(file_bytes, self.session_key, self.initial_vector)
-        # print("File decrypted!")
-        self.logs.put("File decrypted!")
-
-        # print("Saving the file...")
-        self.logs.put("Saving the file...")
-        # TODO: Directory for received from function parameter
-        with open(f"received/{file_name}", "wb") as file:
-            file.write(decrypted_file)
-        # print("File saved!")
-        self.logs.put("File saved!")
 
     # TODO Cancel menu input after reconnecting
     # TODO: Make outside class for console menu
