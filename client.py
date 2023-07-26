@@ -367,29 +367,6 @@ class Client:
         progress.close()
         del progress
 
-    # TODO Cancel menu input after reconnecting
-    # TODO: Make outside class for console menu
-    def console_menu_loop(self) -> None:
-        while True:
-            if self.console_menu_stop.is_set():
-                continue
-            print("1. Send")
-            print("2. Receive")
-            print("3. Send file")
-            print("4. Quit")
-            menu = input(": ")
-            if menu == "1":
-                message = input("Message: ")
-                self.add_message_to_send(message)
-            elif menu == "2":
-                for message in self.get_messages_received():
-                    print(message)
-            elif menu == "3":
-                file_path = input("File path: ")
-                self.add_file_to_send(file_path)
-            elif menu == "4":
-                exit()
-
     def run(self) -> None:
         if not self.running:
             Thread(target=self.send_messages_threading, daemon=True).start()
