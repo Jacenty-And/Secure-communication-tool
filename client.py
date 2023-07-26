@@ -10,7 +10,7 @@ from aes_encryption import encrypt_ECB, decrypt_ECB, encrypt_CBC, decrypt_CBC
 from Crypto.Cipher.AES import block_size as aes_block_size
 from Crypto.Random import get_random_bytes
 
-from threading import Thread, Event
+from threading import Thread
 from queue import Queue
 
 from tqdm import tqdm
@@ -42,7 +42,6 @@ class Client:
         self.sym_encrypt = encrypt_ECB if self.cipher_mode == "ECB" else encrypt_CBC
         self.sym_decrypt = decrypt_ECB if self.cipher_mode == "ECB" else decrypt_CBC
 
-        self.console_menu_stop = Event()
         self.running = False
 
     def try_host_else_connect(self) -> Tuple[socket.socket, bool]:
@@ -251,14 +250,12 @@ class Client:
                 self.reconnect()
 
     def reconnect(self) -> None:
-        self.console_menu_stop.set()
         self.client_socket, self.is_hosting = self.try_host_else_connect()
         # TODO: Make outside function to specify generate_or_receive_session_key_and_params parameters
         self.algorithm_type, self.key_size, self.block_size, self.cipher_mode, self.initial_vector, self.session_key \
             = self.generate_or_receive_session_key_and_params()
         self.sym_encrypt = encrypt_ECB if self.cipher_mode == "ECB" else encrypt_CBC
         self.sym_decrypt = decrypt_ECB if self.cipher_mode == "ECB" else decrypt_CBC
-        self.console_menu_stop = Event()
 
     def add_message_to_send(self, message: str) -> None:
         self.messages_to_send.put(message)
@@ -274,6 +271,7 @@ class Client:
             message = self.messages_to_send.get()
 
             ciphertext = self.sym_encrypt(b"<MESSAGE>", self.session_key, self.initial_vector)
+            # TODO: ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
             self.client_socket.sendall(ciphertext)
 
             message_bytes = message.encode()
@@ -286,7 +284,6 @@ class Client:
         message = decrypted.decode()
         self.messages_received.put(message)
 
-    # TODO Move reading from the file to send_files_threading function
     def add_file_to_send(self, filename: str) -> None:
         self.files_to_send.put(filename)
 
@@ -321,7 +318,6 @@ class Client:
             self.send_file(file_path, file_size)
 
             self.logs.put("File sent!")
-            self.console_menu_stop = Event()
 
     def send_file(self, file_path: str, file_size: int) -> None:
         file_name = file_path.split("/")[-1]
