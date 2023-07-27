@@ -300,7 +300,6 @@ class Client:
     def send_files_threading(self) -> None:
         while True:
             file_path = self.files_to_send.get()
-            self.console_menu_stop.set()
 
             ciphertext = self.sym_encrypt(b"<FILE>", self.session_key, self.initial_vector)
             self.client_socket.sendall(ciphertext)
