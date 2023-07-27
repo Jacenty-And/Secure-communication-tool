@@ -69,6 +69,8 @@ class Gui:
 
     def get_file_to_send(self) -> None:
         filename = askopenfilename(filetypes=(("All files", " *.* "),))
+        if filename == '':
+            return
         self.text_area.config(state="normal")
         self.text_area.insert("end", f"Sending: {filename}\n")
         self.text_area.yview("end")
