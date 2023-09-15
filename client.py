@@ -13,14 +13,13 @@ from Crypto.Random import get_random_bytes
 from threading import Thread
 from queue import Queue
 
-from tqdm import tqdm
+# TODO: tqdm progress bar only when console menu
+# from tqdm import tqdm
 
 from os.path import getsize
 
-# FILE_PARTITION_SIZE = 1_048_576  # MB
-# FILE_PARTITION_SIZE = 80
-# TODO: make bigger FILE_PARTITION_SIZE
-FILE_PARTITION_SIZE = 64
+FILE_PARTITION_SIZE = 1_048_576  # MB
+# FILE_PARTITION_SIZE = 524_288  # 0.5 MB
 
 
 class Client:
@@ -287,15 +286,10 @@ class Client:
     def add_file_to_send(self, filename: str) -> None:
         self.files_to_send.put(filename)
 
-    def get_file_receiving_progress(self, tracked_file_name: str = None) -> Tuple[str, int]:
-        while True:
-            file_name, total_size, received_size = self.files_bytes_received.get()
-            if file_name != tracked_file_name and tracked_file_name is not None:
-                file_tuple = (file_name, total_size, received_size)
-                self.files_bytes_received.put(file_tuple)
-                continue
-            progress_percent = int(received_size / total_size * 100)
-            return file_name, progress_percent
+    def get_file_receiving_progress(self) -> Tuple[str, int]:
+        file_name, total_size, received_size = self.files_bytes_received.get()
+        progress_percent = int(received_size / total_size * 100)
+        return file_name, progress_percent
 
     def send_files_threading(self) -> None:
         while True:
@@ -320,17 +314,22 @@ class Client:
 
     def send_file(self, file_path: str, file_size: int) -> None:
         file_name = file_path.split("/")[-1]
-        progress = tqdm(range(file_size), f"Sending {file_name}",
-                        unit="B", unit_scale=True, unit_divisor=1024)
+        # progress = tqdm(range(file_size), f"Sending {file_name}",
+        #                 unit="B", unit_scale=True, unit_divisor=1024)
         bytes_sent = 0
         with open(file_path, "rb") as file:
             while bytes_sent < file_size:
                 file_bytes = file.read(FILE_PARTITION_SIZE)
                 ciphered_file_bytes = self.sym_encrypt(file_bytes, self.session_key, self.initial_vector)
+
+                send_size_bytes = len(ciphered_file_bytes).to_bytes(64, "little")
+                ciphertext = self.sym_encrypt(send_size_bytes, self.session_key, self.initial_vector)
+                self.client_socket.sendall(ciphertext)
+
                 self.client_socket.sendall(ciphered_file_bytes)
                 bytes_sent += len(file_bytes)
-                progress.update(len(file_bytes))
-        progress.close()
+                # progress.update(len(file_bytes))
+        # progress.close()
 
     def receive_file(self) -> None:
         received = self.client_socket.recv(1024)
@@ -341,8 +340,8 @@ class Client:
         decrypted = self.sym_decrypt(received, self.session_key, self.initial_vector)
         file_size = int.from_bytes(decrypted, byteorder='little')
 
-        progress = tqdm(range(file_size), f"Receiving {file_name}",
-                        unit="B", unit_scale=True, unit_divisor=1024)
+        # progress = tqdm(range(file_size), f"Receiving {file_name}",
+        #                 unit="B", unit_scale=True, unit_divisor=1024)
 
         bytes_received = 0
 
@@ -350,21 +349,28 @@ class Client:
         self.files_bytes_received.put(file_tuple)
 
         # TODO: Directory for received from function parameter
-        open(f"received/{file_name}", "w").close()
-        with open(f"received/{file_name}", "ab") as file:
+        path = f"D:/Studia/Semestr_6/Bezpieczenstwo_Systemow_Komputerowych/received/{file_name}"
+        file = open(path, "w")
+        file.close()
+        with open(path, "ab") as file:
             while bytes_received < file_size:
-                # TODO: dynamic number of bytes to receive
-                data = self.client_socket.recv(FILE_PARTITION_SIZE + 16)
+                received = self.client_socket.recv(80)
+                decrypted = self.sym_decrypt(received, self.session_key, self.initial_vector)
+                receive_size = int.from_bytes(decrypted, byteorder='little')
+
+                data = b""
+                while len(data) < receive_size:
+                    data += self.client_socket.recv(receive_size - len(data))
                 decrypted = self.sym_decrypt(data, self.session_key, self.initial_vector)
                 file.write(decrypted)
                 bytes_received += len(decrypted)
-                progress.update(len(decrypted))
+                # progress.update(len(decrypted))
 
                 file_tuple = (file_name, file_size, bytes_received)
                 self.files_bytes_received.put(file_tuple)
 
-        progress.close()
-        del progress
+        # progress.close()
+        # del progress
 
     def run(self) -> None:
         if not self.running:

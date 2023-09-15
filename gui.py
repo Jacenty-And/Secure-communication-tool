@@ -87,10 +87,9 @@ class Gui:
             progress_label = tkinter.Label(self.window, text=f"{progress_bar['value']}%", background="lightgray")
             progress_label.pack()
             while True:
-                if progress_bar["value"] <= progress:
-                    progress_bar["value"] = progress
-                    progress_label["text"] = f"{progress}%"
-                    _, progress = self.client.get_file_receiving_progress(tracked_file_name)
+                progress_bar["value"] = progress
+                progress_label["text"] = f"{progress}%"
+                _, progress = self.client.get_file_receiving_progress()
                 if progress >= 100:
                     file_name_label.destroy()
                     progress_bar.destroy()
